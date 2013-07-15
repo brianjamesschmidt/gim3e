@@ -1,14 +1,3 @@
-# GIM3E model sampler 
-#
-# Release          Date           Author            Notes
-# -----------------------------------------------------------------------------------------
-# GMS 0.01         07.10.2013     Brian Schmidt     Development version, tested as stable
-#                                                   
-# This module was developed and written at the University of California, San Diego
-# in the Systems Biology Research Group for the Systems Biology of EnteroPathogens
-# project. This work was funded by the NIAID under Interagency agreement Y1-AI-8401
-#
-
 from cobra import solvers
 # Load these to help determine which solver solutions are OK
 acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance', 'x_bound_infeasible']

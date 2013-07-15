@@ -1,16 +1,3 @@
-# Gene Inactivation Moderated by Metabolism, Metabolomics, and Expression
-# Release history
-#
-# Release          Date           Author            Notes
-# -----------------------------------------------------------------------------------------
-# GIM3E  1.01      XX.XX.2013     Brian Schmidt    Minor bug fixes
-# GIM3E  1.0       07.05.2013     Brian Schmidt    Initial release
-#                                                   
-# This module was developed and written at the University of California, San Diego
-# in the Systems Biology Research Group for the Systems Biology of EnteroPathogens
-# project. This work was funded by the NIAID under Interagency agreement Y1-AI-8401
-#
-
 # Load these to help determine which solver solutions are OK
 acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance', 'x_bound_infeasible']
 # May want to include this as acceptable when running cplex
