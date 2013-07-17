@@ -2266,8 +2266,15 @@ def local_solve_cplex_problem(lp, **kwargs):
         if (lp.solution.get_quality_metrics()).x_bound_error_max <= kwargs['tolerance_feasibility']:
             status = get_status(lp)
         else:
-            # if tolerance is violated, report the result as 'infeasible'
-            status = 'x_bound_infeasible'
+            status = get_status(lp)
+            if status not in acceptable_solution_strings:
+                # Don't need to modify here
+                status = status
+            else:
+                # Then we need to enforce x_bound_infeasible status
+                # so this is not missed
+                status = 'x_bound_infeasible'
+                
     else:
         status = get_status(lp)
     return status
