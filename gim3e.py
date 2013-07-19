@@ -112,11 +112,10 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
 
     FVA_with_minimum_penalty = {}
     best_total_penalty = -1
-	# .copy() seems to work across models better
-    # new_cobra_model = deepcopy(cobra_model)
-    new_cobra_model = cobra_model.copy()
+    # new_cobra_model = cobra_model.copy()
+    new_cobra_model = deepcopy(cobra_model)
 
-    # First finalize the solver to use throught the script
+    # First finalize the solver to use through the script
     solver = check_solver(solver)
     if type(solver) == types.NoneType:
         print("Cannot identify a working solver, exiting ...")
@@ -136,6 +135,14 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         tolerance_integer = integer_tolerances[solver]
 
         print("Determining the best objective value...")
+        #the_solution = gim3e_optimize(cobra_model, objective_sense = 'maximize', 
+        #           the_problem = None, solver = solver,  
+        #           error_reporting = None,
+        #           tolerance_optimality = solver_tolerance, 
+        #           tolerance_feasibility = solver_tolerance,
+        #           tolerance_barrier = 0.0001 * solver_tolerance,
+        #           tolerance_integer = tolerance_integer)		
+		
         gim3e_optimize(new_cobra_model, objective_sense = 'maximize', 
                    the_problem = None, solver = solver,  
                    error_reporting = None,
@@ -167,7 +174,6 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         # reactions to the media.
         print("Converting to irreversible...")
         exchange_reactions = new_cobra_model.reactions.query("EX_")
-        #temp_ex_dict_initial = {x.id: {'upper': x.upper_bound, 'lower':x.lower_bound} for x in exchange_reactions}
         unmodified_exchange_reactions = deepcopy(exchange_reactions)
         for the_reaction in exchange_reactions:
             the_reaction.upper_bound = 1000
@@ -187,7 +193,6 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             else:
                 the_forward_reaction.upper_bound, the_forward_reaction.lower_bound = (0, 0)
         print("... OK")
-        #temp_ex_dict_final = {x.id: {'upper': new_cobra_model.reactions.get_by_id(x.id).upper_bound, 'lower': -1. * new_cobra_model.reactions.get_by_id(x.id + '_reverse').upper_bound} for x in exchange_reactions}		
 
     if ((len(metabolite_list) > 0) & (continue_flag == True)):
         print("Adding turnover metabolites...")
@@ -325,6 +330,8 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             if type(new_cobra_model.solution) != types.NoneType:
                 best_total_penalty = new_cobra_model.solution.f
                 if new_cobra_model.solution.status not in acceptable_solution_strings:
+                    # import pdb
+                    # pdb.set_trace()	
                     print("Failed to find a solution when minimizing the penalties, exiting...")
                     continue_flag = False
             else:
@@ -2458,6 +2465,7 @@ def evaluate_penalties(cobra_model, new_cobra_model, expression_dict, expression
      penalties: a dictionary with reaction keys and penalty values
     
     """
+    from cobra.core.Reaction import Reaction
     # Check whether we have reaction or gene penalties.  Default is gene.
     # Reaction penalties added to help in situations like flux minimization.
     # Rather than user specifying, nicer to have an automated check here.
@@ -2479,11 +2487,10 @@ def evaluate_penalties(cobra_model, new_cobra_model, expression_dict, expression
                         if the_reaction.reflection.id not in expression_dict.keys():
                             penalties[the_reaction.reflection.id] = max(0, cur_penalty)
             # Assign zero penalty to reactions not in the expression_dict
-            else:
+            elif the_reaction.id not in penalties.keys():
                 penalties[the_reaction.id] = 0
     else:
         penalties = evaluate_gene_penalties(new_cobra_model, expression_dict, expression_threshold)
-
     return penalties
 
 
