@@ -112,7 +112,9 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
 
     FVA_with_minimum_penalty = {}
     best_total_penalty = -1
-    new_cobra_model = deepcopy(cobra_model)
+	# .copy() seems to work across models better
+    # new_cobra_model = deepcopy(cobra_model)
+    new_cobra_model = cobra_model.copy()
 
     # First finalize the solver to use throught the script
     solver = check_solver(solver)
@@ -132,8 +134,6 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         else:
             epsilon = 0
         tolerance_integer = integer_tolerances[solver]
-        
-        
 
         print("Determining the best objective value...")
         gim3e_optimize(new_cobra_model, objective_sense = 'maximize', 
@@ -157,8 +157,8 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
     if continue_flag:
         if fraction_growth >= ((best_objective - solver_tolerance) / best_objective):
             fraction_growth = (best_objective - solver_tolerance) / best_objective                
-            print("Fraction of growth must take numerical limitations into consideration and cannot be set too close to 1.  Resetting to " + str(fraction_growth) + ".")
-
+            print("Fraction of growth must take numerical limitations into consideration and cannot be set too close to 1.  Resetting to " + str(fraction_growth) + ".")	
+			
         # First make the model irreversible.
         # First set exchange constraints to +/- max so media exchanges are
         # are given a _reverse reaction even if it is not used.
@@ -167,12 +167,12 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         # reactions to the media.
         print("Converting to irreversible...")
         exchange_reactions = new_cobra_model.reactions.query("EX_")
+        #temp_ex_dict_initial = {x.id: {'upper': x.upper_bound, 'lower':x.lower_bound} for x in exchange_reactions}
         unmodified_exchange_reactions = deepcopy(exchange_reactions)
         for the_reaction in exchange_reactions:
             the_reaction.upper_bound = 1000
             the_reaction.lower_bound = -1000
         convert_to_irreversible_with_genes(new_cobra_model, mutually_exclusive_directionality_constraint = MILP_formulation)
-        exchange_reactions = new_cobra_model.reactions.query("EX_")
         for reference_reaction in unmodified_exchange_reactions:
             the_forward_reaction = new_cobra_model.reactions.get_by_id(reference_reaction.id)
             the_reverse_reaction = new_cobra_model.reactions.get_by_id(reference_reaction.id + "_reverse")        
@@ -187,7 +187,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             else:
                 the_forward_reaction.upper_bound, the_forward_reaction.lower_bound = (0, 0)
         print("... OK")
-
+        #temp_ex_dict_final = {x.id: {'upper': new_cobra_model.reactions.get_by_id(x.id).upper_bound, 'lower': -1. * new_cobra_model.reactions.get_by_id(x.id + '_reverse').upper_bound} for x in exchange_reactions}		
 
     if ((len(metabolite_list) > 0) & (continue_flag == True)):
         print("Adding turnover metabolites...")
@@ -219,6 +219,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             tolerance_barrier=0.0001 * solver_tolerance,
             tolerance_integer = tolerance_integer)
         best_objective_with_mets = (new_cobra_model.solution.f)
+		
         # This flag should never show up, but here just in case issues arise that require troubleshooting
         if new_cobra_model.solution.status not in acceptable_solution_strings:
             print("Cannot optimize the problem with turnover metabolites, even with no minimum flux requirement!  Exiting...")
@@ -243,7 +244,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         print("... OK, done creating and verifying turnover metabolites (individually).")
     elif continue_flag == True:
         best_objective_with_mets = best_objective
-    
+		
     if (monitor_all_cellular_metabolites & (continue_flag == True)):
         cellular_metabolite_list = []
         for the_metabolite in new_cobra_model.metabolites:
@@ -279,6 +280,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
                 fraction_growth = min(best_objective_with_mets / best_objective, (best_objective - solver_tolerance) / best_objective)
                 print("Warning: cannot operate at desired fraction of optimum.  Reducing to: "+ str(fraction_growth) +" of value with no metabolite constraints.")
 
+
         # Use the reaction penalties as an objective.
         old_objective = {}      
         for reaction in new_cobra_model.reactions:
@@ -308,7 +310,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
         # Also optimize the model for the the penalty score.
         # Penalties are positive so this becomes a
         # minimization problem.
-                
+
         if (sum(penalties.values()) > 0):
             # It may not be reasonable to use very "tight"
             # tolerances when optimizing e.g. the
@@ -340,7 +342,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             relative_penalty_bound = 0
     else:
         best_total_penalty = 0
-        
+
     if (continue_flag == True):
         if relative_penalty_bound <= 0:
             test_bound = 0
@@ -828,7 +830,7 @@ def irreversible_flux_variability_analysis(cobra_model, **kwargs):
                 objective_reaction.objective_coefficient = nonzero_objective_coefficient
                 nonzero_objective_list = [objective_reaction.id]
             else:
-                add_sense_aware_bounds(cobra_model,
+                the_output = add_sense_aware_bounds(cobra_model,
                     objective_sense = objective_sense, 
                     fraction_of_optimum = fraction_of_optimum,
                     solver=solver,
@@ -837,8 +839,12 @@ def irreversible_flux_variability_analysis(cobra_model, **kwargs):
                     tolerance_barrier = tolerance_barrier,
                     tolerance_integer = tolerance_integer,
                     bound_best_optimum = False)
-                objective_reaction = cobra_model.reactions.get_by_id(nonzero_objective_list[0])
-                nonzero_objective_coefficient = objective_reaction.objective_coefficient
+                if the_output != None:
+					objective_reaction = cobra_model.reactions.get_by_id(nonzero_objective_list[0])
+					nonzero_objective_coefficient = objective_reaction.objective_coefficient
+                else:
+					print("Unable to add a minimum bound for the objective reaction in FVA. Exiting ...")
+					continue_flag = False
             best_solution = gim3e_optimize(cobra_model,
                 solver=solver,
                 objective_sense=objective_sense,
@@ -871,12 +877,11 @@ def irreversible_flux_variability_analysis(cobra_model, **kwargs):
                     tolerance_feasibility = tolerance_feasibility,
                     tolerance_barrier = tolerance_barrier,
                     tolerance_integer = tolerance_integer)
-
-        # Back up the optimal solution to access later
-        optimized_model = deepcopy(cobra_model)
-        objective_reaction.objective_coefficient = 0.
         
         if continue_flag:
+            # Back up the optimal solution to access later
+            optimized_model = deepcopy(cobra_model)
+            objective_reaction.objective_coefficient = 0.
             if verbose:
                 start_time = time()
             # FVA: STEP THROUGH REACTIONS
@@ -1313,21 +1318,27 @@ def add_sense_aware_bounds(cobra_model, **kwargs):
     to impose the bounds, which is done for
     multi-component objectives.  The model is modified in-place
 
-    objective_sense: 'maximize' or 'minimize'
-     will also affect how fraction of optimum is applied
+	kwargs:
+     objective_sense: 'maximize' or 'minimize'
+      will also affect how fraction of optimum is applied
 
-    fraction_of_optimum: fraction of the best achievable value to restrict
-     the solution to
+     fraction_of_optimum: fraction of the best achievable value to restrict
+      the solution to
 
-    bound_best_optimum: a bound always placed on the worst
-     objective value, as determined by fraction_of_optimum.
-     This Boolean variable indicates whether to also add
-     one to reflect the best.
+     bound_best_optimum: a bound always placed on the worst
+      objective value, as determined by fraction_of_optimum.
+      This Boolean variable indicates whether to also add
+      one to reflect the best.
 
-    solver parameters: solver, tolerance_feasibility,  tolerance_optimality,  tolerance_integer
+     solver parameters: solver, tolerance_feasibility,  tolerance_optimality,  tolerance_integer
+	 
+	returns:
+	 cobra_model if effective, None if not
+	 
 
     
     """
+    import types
     from copy import deepcopy
     from cobra.core.Metabolite import Metabolite
     from cobra.core.Reaction import Reaction
@@ -1352,12 +1363,12 @@ def add_sense_aware_bounds(cobra_model, **kwargs):
 
     solver, tolerance_optimality, tolerance_feasibility, tolerance_barrier, tolerance_integer = get_solver_parameters(**kwargs)
 
-    continue_conversion = False
+    continue_conversion = True
 
     nonzero_objective_list = [x.id for x in cobra_model.reactions if abs(x.objective_coefficient) > 0]
 
     if len(nonzero_objective_list) != 1:
-        print("Only call add_sense_aware_bounds for objectives with eactly one component, exiting ...")
+        print("Only call add_sense_aware_bounds for objectives with exactly one component, exiting ...")
     else:
         # Have noted overconstraining solution may present
         # challenges in finding the optimum.  This is not
@@ -1371,9 +1382,14 @@ def add_sense_aware_bounds(cobra_model, **kwargs):
         wt_solution = cobra_model.solution.f
         objective_reaction = cobra_model.reactions.get_by_id(nonzero_objective_list[0])
         # Usually the coefficient will be 1.
-        best_obj_reaction_value = wt_solution / objective_reaction.objective_coefficient
-        
-        if objective_sense == 'maximize':
+        if type(wt_solution) != types.NoneType:
+			best_obj_reaction_value = wt_solution / objective_reaction.objective_coefficient
+        else:
+			continue_conversion = False
+			print("Unable to optimize input model while adding sense aware bounds.")
+			return None
+	
+        if (objective_sense == 'maximize') & continue_conversion:
             # Since we aren't making a new objective function,
             # we respect existing limits on the objective
             # and don't include a check on
@@ -1394,11 +1410,11 @@ def add_sense_aware_bounds(cobra_model, **kwargs):
                 # else: if we are going to maximize & best_value is negative,
                 # if the fr of optimum is 0 we don't need to add a bound.
 
-        elif objective_sense == 'minimize':
+        elif (objective_sense == 'minimize') & (continue_conversion):
+            if bound_best_optimum:
             # Since we aren't making a new objective function,
             # we respect existing limits on the objective            
-            if bound_best_optimum:
-                objective_reaction.lower_bound = best_obj_reaction_value            
+				objective_reaction.lower_bound = best_obj_reaction_value            
             if best_obj_reaction_value >= 0:
                 # There are several options to scale the upper bound  for poor 
                 # consistency in this scenario.  We could find the global worst 
