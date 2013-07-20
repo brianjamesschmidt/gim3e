@@ -1237,9 +1237,9 @@ def convert_to_reversible(cobra_model):
         else:
             if the_reaction.id.startswith('TMS_'):
                 # Get rid of TMs as well
-				# May need to add these back in, had inconsistent results between models.
-                #for the_metabolite in the_reaction._metabolites.keys():
-                #    the_metabolite.remove_from_model()
+		# May need to add/take these out, had inconsistent results between models.
+                for the_metabolite in the_reaction._metabolites.keys():
+                    the_metabolite.remove_from_model()
                 the_reaction.delete()
                 cobra_model.reactions.remove(the_reaction)
                 
