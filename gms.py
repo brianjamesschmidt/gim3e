@@ -258,7 +258,6 @@ def create_warmup_points(sampling_object, **kwargs):
                                 # flag if we start in violation.
                                 the_solution = None
                     the_reaction.objective_coefficient = 1.
-
                     
                     the_result = sampling_optimize(cobra_model,
                         solver = solver,
@@ -273,7 +272,6 @@ def create_warmup_points(sampling_object, **kwargs):
                         tolerance_barrier = tolerance_barrier,
                         tolerance_integer = tolerance_integer)
                     the_reaction.objective_coefficient = 0
-
 
                     # Now reset the reaction bounds for the reverse reaction.
                     if 'reflection' in dir(the_reaction):
@@ -392,27 +390,42 @@ def achr_sampler(sampling_object, **kwargs):
         else:
             solver_tolerance = kwargs['solver_tolerance']
 
-        # All solutions will be numerically checked for remaining within this
-        # tolerance of the edges
-        edge_buffer = 1.01
-        edge_buffer_absolute = solver_tolerance * (edge_buffer - 1)
-
+        # Tolerance for reprojecting the current point into the null space
+        null_space_tolerance = solver_tolerance * 1E-6
+		
         if 'max_time' in kwargs:
             max_time = kwargs['max_time']
         else:
             max_time = 0
 
-        # Minimum allowed distance to the closest constraint
-        max_min_tol = edge_buffer_absolute
+	# Steps must be larger than this to be effective
+        if 'max_min_factor' in kwargs:
+            max_min_factor = kwargs['max_min_factor']
+        else:
+            max_min_factor = 1E-6
+        max_min_tol = solver_tolerance * max_min_factor
         
-        # Ignore directions where u is really small
-        tolerance_u = edge_buffer_absolute
-        
-        # tolerance_d = 1e-14;
-        tolerance_d = edge_buffer_absolute
+        # Ignore directions where the distance to the boundary
+	# is small when computing allowed
+        # steps.  Here, can be a bit more liberal.
+        if 'tolerance_u_factor' in kwargs:
+            tolerance_u_factor = kwargs['tolerance_u_factor']
+        else:
+            tolerance_u_factor = 1E-6
+        tolerance_u = solver_tolerance * tolerance_u_factor
 
-        # final check that all solutions must pass
-        edge_buffer_check_final = edge_buffer_absolute
+	# A check on the size of the 
+        # components of the unit step vector
+        # Small components are ignored when checking
+        # for how far the point can be moved
+        if 'tolerance_d_factor' in kwargs:
+            tolerance_d_factor = kwargs['tolerance_d_factor']
+        else:
+            tolerance_d_factor = 1E-6
+        tolerance_d = solver_tolerance * tolerance_d_factor
+
+        # final check buffer for the turnover metabolites
+        edge_buffer_check_final = 0
 
         warmup_points = sampling_object.warmup_points
         # Number of warmup points
@@ -437,7 +450,7 @@ def achr_sampler(sampling_object, **kwargs):
             # Can in theory pare this down to ~200 as in previous ACHR
             # But this did not work well in preliminary testing
             # I had acceptable results with 50% of the # of warmup points.
-            n_steps_per_point = max(round(n_warmup_points / 2), 200)
+            n_steps_per_point = round(n_warmup_points * 1.5)
             # May want to increase default to n_warmup_points if
             # mix_frac still looks bad
 
@@ -637,18 +650,20 @@ def achr_sampler(sampling_object, **kwargs):
                     max_step = max_step_vec.min()
                     min_step = min_step_vec.max()
 
-                    # Just move on: pick a new direction if we are too close to a boundary                    
+                    # Just move on: pick a new direction if the step is too small
+					# Otherwise, we will to update
                     if not ((abs(min_step) < max_min_tol) & (abs(max_step) < max_min_tol)) | (min_step > max_step):
                         norm_step = random.random()
                         step_dist = (norm_step * (max_step - min_step)) + min_step
                         cur_rev_point = nadd(previous_rev_point, (step_dist * u))
-                        # Reproject the point to avoid accumulating numerical errors, take this out for now
+                        # Reproject the point to avoid accumulating numerical errors
                         if attempted_steps_for_current_point % 25 == 0:
-                            if (((abs(dot(S_matrix, cur_rev_point))).max()) > (edge_buffer_absolute)):
+                            if (((abs(dot(S_matrix, cur_rev_point))).max()) > (null_space_tolerance)):
                                 # Check only needed for magnitude, debugging, new should be smaller
                                 cur_rev_point = dot(N_rev, dot(transpose(N_rev), cur_rev_point))
 
-                        # Just consider movable points to avoid complications from numerical errors in stable points
+                        # Consider which points can be moved.  Just consider movable points 
+						# to avoid complications from numerical errors in stable points
                         n_over = nsum(cur_rev_point[valid_dir_rev_ind] > ub_rev[valid_dir_rev_ind])
                         n_under = nsum(cur_rev_point[valid_dir_rev_ind] < lb_rev[valid_dir_rev_ind])
                         
@@ -1221,9 +1236,10 @@ def convert_to_reversible(cobra_model):
             deleted_list.append(the_reaction.id)
         else:
             if the_reaction.id.startswith('TMS_'):
-                # Get rid of VMs as well
-                for the_metabolite in the_reaction._metabolites.keys():
-                    the_metabolite.remove_from_model()
+                # Get rid of TMs as well
+				# May need to add these back in, had inconsistent results between models.
+                #for the_metabolite in the_reaction._metabolites.keys():
+                #    the_metabolite.remove_from_model()
                 the_reaction.delete()
                 cobra_model.reactions.remove(the_reaction)
                 
@@ -1499,19 +1515,6 @@ def save_sampling_object(the_sampling_object, filename, path = ""):
     cPickle.dump(sampling_dict, fp)
     #json.dump(the_sampling_object, fp)
     fp.close()
-    
-    # if len(path) == 0:
-    #     new_path = "."
-    # else:
-    #     new_path = path
-    # files = [f for f in os.listdir(new_path) if os.path.isfile(f)]
-    # if (filename + "_warmup_point_matrix.npy") in files:
-    #     the_sampling_object.warmup_points = load(path + filename + "_warmup_point_matrix.npy")
-    # if (filename + "_sampled_points.npy") in files:
-    #     the_sampling_object.sampled_points = load(path + filename + "_sampled_points.npy")
-    # if (filename + "_initial_points.npy") in files:
-    #     the_sampling_object.initial_points = load(path + filename + "_initial_points.npy")
-
 
 
 def load_sampling_object(filename, path = ""):
@@ -1694,9 +1697,12 @@ def reduce_warmup_points(sampling_object, **kwargs):
         return warmup_points
 
 
-def convert_sampling_results_to_reversible(sampling_container):
+def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     """ Take sampling results and convert them from a reversible to
     an irreversible format
+	
+	kwargs:
+	 type: type of points to convert, "sampled" or "warmup"
 
     Returns:
      the_converted_results
@@ -1706,10 +1712,19 @@ def convert_sampling_results_to_reversible(sampling_container):
     import types
     from numpy import zeros, NaN
 
+    if "type" in kwargs:
+		the_result_type = kwargs["type"]
+    else:
+		the_result_type = "sampled"
+		
     # For now assume the full model will be converted to irreversible
     cobra_model = sampling_container.cobra_model_full
     sampled_point_names = sampling_container.the_reaction_ids_full
-    sampled_matrix = sampling_container.sampled_points
+
+    if the_result_type == "warmup":
+		sampled_matrix = sampling_container.warmup_points
+    else:
+		sampled_matrix = sampling_container.sampled_points
     
     the_raw_reactions_to_convert = [x for x in sampling_container.the_reaction_ids_full if not x.startswith("IRRMILP_")]
     paired_reaction_dict = {}
