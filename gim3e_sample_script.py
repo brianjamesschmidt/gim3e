@@ -1,4 +1,4 @@
-# A sample script to illustrate the use of GIM^3E and check the 
+# A sample script to illustrate the use of GIM3E and check the 
 # results your solver returns
 #
 # The tests were run with the 32-bit CPLEX 12.5.0 
@@ -10,7 +10,7 @@
 # For macs:
 # export VERSIONER_PYTHON_PREFER_32_BIT=yes
 #
-# Note GLPK does not work very well for GIM^3E MILP problems
+# Note GLPK does not work very well for GIM3E MILP problems
 # 
 # Note Gurobi 5.1 appears to work, but note integer tolerances
 # are different than for CPLEX 12.5.
