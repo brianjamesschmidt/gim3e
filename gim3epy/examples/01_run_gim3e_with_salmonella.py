@@ -16,24 +16,29 @@
 # are different than for CPLEX 12.5.
 #
 
-import gim3e
+from gim3epy.core import gim3e
 import pickle
 from cobra.manipulation import initialize_growth_medium
 from copy import deepcopy
 from types import *
 
+gim3e_dir = gim3e.__file__
+n_remove_chars = len('/core/gim3e.py')
+gim3e_dir = gim3e_dir[:(-1 * (n_remove_chars))]
+data_dir = gim3e_dir + "/data/"
+
 # read in the pre-processed omics data
-fp = open("transcriptomics_dict.pickle", "rb")
+fp = open(data_dir + "transcriptomics_dict.pickle", "rb")
 transcriptomics_dict = pickle.load(fp)
 fp.close()
 
-fp = open("metabolomics_dict.pickle", "rb")
+fp = open(data_dir + "metabolomics_dict.pickle", "rb")
 metabolomics_dict = pickle.load(fp)
 fp.close()
 
 # Make models not informed by omics first by initializing the media
 import pickle
-fp = open("salmonella_gem.pickle", "rb")
+fp = open(data_dir + "salmonella_gem.pickle", "rb")
 STM = pickle.load(fp)
 fp.close()
 
@@ -72,11 +77,11 @@ gim3e_model, gim3e_FVA, total_penalty = gim3e.gim3e(STM_LB, expression_dict = tr
     monitor_all_cellular_metabolites = True,
     MILP_formulation = True,
     run_FVA = True, reduce_model = False,
-    trim_model = False, solver = 'cplex')
+    trim_model = True, solver = 'cplex')
 
 # Check the results against a reference run.  
 filename = "STM_LB_FVA_reference.pickle"
-fp = open(filename, "rb")
+fp = open(data_dir + filename, "rb")
 gim3e_FVA_ref = pickle.load(fp)
 fp.close()
 
@@ -122,12 +127,11 @@ metabolite_ko_result = gim3e.irreversible_reaction_knockout_analysis(gim3e_model
                         tolerance_feasibility = selected_tolerance,
                         tolerance_barrier= 0.0001 * selected_tolerance,
                         error_reporting=None,
-                        number_of_processes=1,
                         verbose = True)
 
 # Check the results against a reference run.  
 filename = "STM_LB_metabolite_ko_reference.pickle"
-fp = open(filename, "rb")
+fp = open(data_dir + filename, "rb")
 metabolite_ko_result_ref = pickle.load(fp)
 fp.close()
 

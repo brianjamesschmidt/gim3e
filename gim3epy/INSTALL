@@ -1,0 +1,14 @@
+The heart of gim3e for python is in gim3epy/core, in the gim3e module.  
+There is a sample script, '01_run_gim3e_with_salmonella.py',
+that implements gim3e and walks through some of the analysis that can be performed. 
+ 
+To use gim3e for python, it is necessary to install:
+   1) COBRApy 0.2.x 
+   2) Ideally, one of these solvers should be used since they perform well with the gim3e MILP models:
+      a. ILOG/CPLEX 12.5.0 or later (http://www-01.ibm.com/software/integration/optimization/cplex-optimizer/)
+      b. gurobi 5.1 or later (http://gurobi.com)
+
+EXPERIMENTAL: A sampler is included for the gim3e models, and its use is also demonstrated in the sample scripts.
+The sampler has been tested with the included model of E. coli core metabolism, but is still in development since
+it has not been extensively tested with the full genome-scale models.
+

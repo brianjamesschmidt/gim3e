@@ -8,10 +8,9 @@
 # command line since IBM hasn't released a 64-bit version for OSX.
 # For macs:
 # export VERSIONER_PYTHON_PREFER_32_BIT=yes
-import gim3e
-import gms
+from gim3e.core import gim3e
+from gim3e.sampling import gms
 import pickle
-from cobra.manipulation import initialize_growth_medium
 from copy import deepcopy
 from types import *
 from cobra.io.sbml import create_cobra_model_from_sbml_file
@@ -20,9 +19,14 @@ selected_tolerance = 1E-8
 selected_growth = 0
 selected_penalty = 0
 
+gim3e_dir = gim3e.__file__
+n_remove_chars = len('/core/gim3e.py')
+gim3e_dir = gim3e_dir[:(-1 * (n_remove_chars))]
+data_dir = gim3e_dir + "data/"
+
 # develop the sampling algorithm with E coli core as a first approach
 sbml_file = 'E_coli_core_M9.xml'
-cobra_model = create_cobra_model_from_sbml_file('E_coli_core_M9.xml', print_time=True)
+cobra_model = create_cobra_model_from_sbml_file(data_dir + 'E_coli_core_M9.xml', print_time=True)
 cobra_model.reactions.get_by_id('ATPM').objective_coefficient = 1
 cobra_model.optimize()
 cobra_model.solution.f

@@ -112,7 +112,6 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
 
     FVA_with_minimum_penalty = {}
     best_total_penalty = -1
-    # new_cobra_model = cobra_model.copy()
     new_cobra_model = deepcopy(cobra_model)
 
     # First finalize the solver to use through the script
@@ -134,14 +133,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
             epsilon = 0
         tolerance_integer = integer_tolerances[solver]
 
-        print("Determining the best objective value...")
-        #the_solution = gim3e_optimize(cobra_model, objective_sense = 'maximize', 
-        #           the_problem = None, solver = solver,  
-        #           error_reporting = None,
-        #           tolerance_optimality = solver_tolerance, 
-        #           tolerance_feasibility = solver_tolerance,
-        #           tolerance_barrier = 0.0001 * solver_tolerance,
-        #           tolerance_integer = tolerance_integer)		
+        print("Determining the best objective value...")		
 		
         gim3e_optimize(new_cobra_model, objective_sense = 'maximize', 
                    the_problem = None, solver = solver,  
@@ -329,9 +321,7 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
                    tolerance_integer = tolerance_integer)
             if type(new_cobra_model.solution) != types.NoneType:
                 best_total_penalty = new_cobra_model.solution.f
-                if new_cobra_model.solution.status not in acceptable_solution_strings:
-                    # import pdb
-                    # pdb.set_trace()	
+                if new_cobra_model.solution.status not in acceptable_solution_strings:	
                     print("Failed to find a solution when minimizing the penalties, exiting...")
                     continue_flag = False
             else:
@@ -480,10 +470,10 @@ def add_turnover_metabolites(cobra_model, metabolite_id_list, epsilon):
         r_metabolite = cobra_model.metabolites.get_by_id(metabolite_id)
         sum_abs_source_reaction_bounds = 0
 
-        the_reaction_id_list = [x.id for x in cobra_model.metabolites.get_by_id(metabolite_id)._reaction]
+        the_reaction_id_list = [x.id for x in cobra_model.metabolites.get_by_id(metabolite_id).get_reaction()]
         for the_reaction_id in the_reaction_id_list:
             the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
-            coefficient = abs(the_reaction._metabolites[r_metabolite])
+            coefficient = abs(the_reaction.get_coefficient(r_metabolite))
             the_reaction._metabolites[v_metabolite] = coefficient
             v_metabolite._reaction.add(the_reaction)
             # The model should be irreversible, and the upper bound
@@ -540,21 +530,23 @@ def convert_to_irreversible_with_genes(cobra_model, mutually_exclusive_direction
         # and this would result in adding an empty reaction to the
         # model in addition to the reverse reaction.
         if reaction.lower_bound < 0:
-            reverse_reaction = Reaction(reaction.id + "_reverse")
+            #reverse_reaction = Reaction(reaction.id + "_reverse")
+            reverse_reaction = reaction.copy()
+            reverse_reaction.id = reaction.id + "_reverse"
             reverse_reaction.lower_bound = 0
             reverse_reaction.upper_bound = reaction.lower_bound * -1.
             reaction.lower_bound = 0
             # Make the directions aware of each other
             reaction.reflection = reverse_reaction
             reverse_reaction.reflection = reaction
-            reaction.reversibility = reverse_reaction.reversibility = 0
-            reaction_dict = dict([(k, v*-1)
-                                  for k, v in reaction._metabolites.items()])
+            reaction.reversibility = 0
+            reverse_reaction.reversibility = 0
+            reaction_dict = {}
+            current_metabolites = [x for x in (reverse_reaction.get_products() + reverse_reaction.get_reactants())]
+            for the_metabolite in current_metabolites:
+                reaction_dict[the_metabolite] = -2 * reverse_reaction.get_coefficient(the_metabolite.id)
             reverse_reaction.add_metabolites(reaction_dict)
             reactions_to_add.append(reverse_reaction)
-            # Also: GPRs should copy
-            reverse_reaction.gene_reaction_rule = reaction.gene_reaction_rule
-            reverse_reaction._genes = reaction._genes
             if mutually_exclusive_directionality_constraint:
                 # A continuous reaction bounded by 0., 1.
                 # Serves as a source for the indicator metabolites
@@ -673,14 +665,12 @@ def remove_model_reactions(cobra_model, the_reactions_to_remove = [], FVA_result
       
     # Remove orphaned metabolites
     for metabolite in cobra_model.metabolites:
-        if len(metabolite._reaction) == 0:
+        if len(metabolite.get_reaction()) == 0:
             metabolite.remove_from_model(cobra_model)
-            # print(metabolite.id)
     # Remove orphan genes
     for gene in cobra_model.genes:
-        if len(gene._reaction) == 0:
+        if len(gene.get_reaction()) == 0:
             gene.remove_from_model(cobra_model)
-            # print(gene.id)
 
     return (cobra_model, FVA_result_dict)
 
@@ -2538,7 +2528,7 @@ def evaluate_gene_penalties(new_cobra_model, expression_dict, threshold):
             # Maybe wasteful with regards to computational resources, 
             # but pool all the call info here for the moment
             reaction_gene_dict = {}
-            for the_gene in test_reaction._genes:
+            for the_gene in test_reaction.get_gene():
                 reaction_gene_dict[the_gene] = {}
                 if the_gene.id in expression_dict:
                     reaction_gene_dict[the_gene]['measurement'] = expression_dict[the_gene.id]
@@ -2553,7 +2543,7 @@ def evaluate_gene_penalties(new_cobra_model, expression_dict, threshold):
             # Now evaluate the reaction; if it's on, then we move on, but if we are
             # to prefer "inactivation," we will need to evaluate the penalty
             the_gene_reaction_relation = deepcopy(test_reaction.gene_reaction_rule)
-            for the_gene in test_reaction._genes:
+            for the_gene in test_reaction.get_gene():
                 the_gene_re = re.compile('(^|(?<=( |\()))%s(?=( |\)|$))'%re.escape(the_gene.id))
                 if reaction_gene_dict[the_gene]['present'] == 0:
                     the_gene_reaction_relation = the_gene_re.sub('False', the_gene_reaction_relation)
@@ -2571,7 +2561,7 @@ def evaluate_gene_penalties(new_cobra_model, expression_dict, threshold):
                 # penalty and gene false/absent values are associated with a nonzero 
                 # penalty.
                 the_gene_reaction_relation = deepcopy(test_reaction.gene_reaction_rule)
-                for the_gene in test_reaction._genes:
+                for the_gene in test_reaction.get_gene():
                     the_gene_re = re.compile('(^|(?<=( |\()))%s(?=( |\)|$))'%re.escape(the_gene.id))
                     if reaction_gene_dict[the_gene]['present'] == 1:
                         the_gene_reaction_relation = the_gene_re.sub('0', the_gene_reaction_relation)
