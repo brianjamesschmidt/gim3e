@@ -1,4 +1,4 @@
-The heart of gim3e for python is in gim3epy/core, in the gim3e module.  
+The heart of gim3e for python is in gim3e/core.  
 There is a sample script, '01_run_gim3e_with_salmonella.py',
 that implements gim3e and walks through some of the analysis that can be performed. 
  

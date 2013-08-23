@@ -18,5 +18,5 @@ Release		Date           Notes
 1.0.2		08.20.2013     -Change module structure to prepare for release.
        	       		       -Note GMS is still a "development version" sampler
        	       		        but runs stably and has been tested for E. coli core
-1.0.1   		08.17.2013     -Improved robustness of code
+1.0.1   	08.17.2013     -Improved robustness of code
 1.0.0     	07.05.2013     -Initial release, submitted for publication

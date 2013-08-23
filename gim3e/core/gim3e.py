@@ -470,7 +470,7 @@ def add_turnover_metabolites(cobra_model, metabolite_id_list, epsilon):
         r_metabolite = cobra_model.metabolites.get_by_id(metabolite_id)
         sum_abs_source_reaction_bounds = 0
 
-        the_reaction_id_list = [x.id for x in cobra_model.metabolites.get_by_id(metabolite_id).get_reaction()]
+        the_reaction_id_list = [x.id for x in r_metabolite.get_reaction()]
         for the_reaction_id in the_reaction_id_list:
             the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
             coefficient = abs(the_reaction.get_coefficient(r_metabolite))
@@ -490,7 +490,7 @@ def add_turnover_metabolites(cobra_model, metabolite_id_list, epsilon):
         # 1 unit of flux sink so this matches
         # the turnover through the real metabolite.
         sink_reaction = Reaction("TMS_" + metabolite_id)
-        sink_reaction._metabolites[v_metabolite] = -2
+        sink_reaction.add_metabolites({v_metabolite:-2})
 
         # Ensure a positive flux through the sink.
         # and maximum equal to maximal needed to
@@ -542,11 +542,14 @@ def convert_to_irreversible_with_genes(cobra_model, mutually_exclusive_direction
             reaction.reversibility = 0
             reverse_reaction.reversibility = 0
             reaction_dict = {}
-            current_metabolites = [x for x in (reverse_reaction.get_products() + reverse_reaction.get_reactants())]
+            current_metabolites = [x for x in (reaction.get_products() + reaction.get_reactants())]
             for the_metabolite in current_metabolites:
-                reaction_dict[the_metabolite] = -2 * reverse_reaction.get_coefficient(the_metabolite.id)
+                reaction_dict[the_metabolite] = -2 * reaction.get_coefficient(the_metabolite.id)
             reverse_reaction.add_metabolites(reaction_dict)
             reactions_to_add.append(reverse_reaction)
+            # Also: GPRs should already copy
+            # reverse_reaction.gene_reaction_rule = reaction.gene_reaction_rule
+            # reverse_reaction._genes = reaction._genes
             if mutually_exclusive_directionality_constraint:
                 # A continuous reaction bounded by 0., 1.
                 # Serves as a source for the indicator metabolites

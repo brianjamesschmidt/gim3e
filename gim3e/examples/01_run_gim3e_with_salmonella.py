@@ -16,7 +16,7 @@
 # are different than for CPLEX 12.5.
 #
 
-from gim3epy.core import gim3e
+from gim3e.core import gim3e
 import pickle
 from cobra.manipulation import initialize_growth_medium
 from copy import deepcopy

@@ -18,10 +18,10 @@ except:
 # deal with absolute imports by adding the appropriate directory to the path
 if __name__ == "__main__":
     sys.path.insert(0, "../..")
-    from gim3epy.test import data_directory, create_test_model
-    from gim3epy.test import ecoli_sbml as test_sbml_file
-    from gim3epy.test import salmonella_pickle as test_pickle
-    from gim3epy.core import gim3e
+    from gim3e.test import data_directory, create_test_model
+    from gim3e.test import ecoli_sbml as test_sbml_file
+    from gim3e.test import salmonella_pickle as test_pickle
+    from gim3e.core import gim3e
     sys.path.pop(0)
     assert 0
 else:
@@ -29,7 +29,7 @@ else:
     from . import ecoli_sbml as test_sbml_file
     from . import salmonella_pickle as test_pickle
     sys.path.insert(0, gim3e_directory)
-    import gim3epy.core.gim3e as gim3e
+    import gim3e.core.gim3e as gim3e
     sys.path.pop(0)
 
 # libraries which may or may not be installed
@@ -86,12 +86,12 @@ class TestGim3eCore(Gim3eTestCase):
         the_solver = gim3e.check_solver()
         tolerance_integer = gim3e.integer_tolerances[the_solver]
         milp_model = deepcopy(self.model)
-        gim3e.convert_to_irreversible_with_genes(milp_model, mutually_exclusive_directionality_constraint = True)
+        gim3e.convert_to_irreversible_with_genes(milp_model, mutually_exclusive_directionality_constraint = False)
         epsilon = 1.01 * solver_tolerance
-        gim3e.add_turnover_metabolites(milp_model, ['glu__D_c'], epsilon)
+        gim3e.add_turnover_metabolites(milp_model, ['glc__D_c'], epsilon)
         for x in milp_model.reactions:
             x.objective_coefficient = 0
-        milp_model.reactions.get_by_id('TMS_glu__D_c').objective_coefficient = 1
+        milp_model.reactions.get_by_id('TMS_glc__D_c').objective_coefficient = 1
         gim3e.gim3e_optimize(milp_model, objective_sense = 'maximize', 
             the_problem=None, solver=the_solver,  
             error_reporting=None,
@@ -99,7 +99,7 @@ class TestGim3eCore(Gim3eTestCase):
             tolerance_feasibility = solver_tolerance,
             tolerance_barrier=0.0001 * solver_tolerance,
             tolerance_integer = tolerance_integer)
-        solution = milp_model.solution        
+        solution = milp_model.solution
         self.assertEqual(solution.status, "optimal")
         
 
