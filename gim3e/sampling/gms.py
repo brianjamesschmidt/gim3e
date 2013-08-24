@@ -1643,6 +1643,7 @@ def reduce_warmup_points(sampling_object, **kwargs):
     import numpy
     from numpy import array, zeros, ones, nonzero
     from numpy import logical_and
+    from copy import deepcopy
 
     if 'solver_tolerance' not in kwargs:
         solver_tolerance = 1E-7
