@@ -92,19 +92,24 @@ def create_warmup_points(sampling_object, **kwargs):
             if kwargs['sample_reduced']:
                 if cobra_version == '0.2.0':
                     cobra_model = deepcopy(sampling_object.cobra_model_reduced)
+                    
                 else:
-                    cobra_model = sampling_object.cobra_model_reduced.copy()                
+                    cobra_model = sampling_object.cobra_model_reduced.copy()
+                sampling_ids = sampling_object.the_reaction_ids_reduced
             else:
                 if cobra_version == '0.2.0':
                     cobra_model = deepcopy(sampling_object.cobra_model_full)
+                    
                 else:
-                    cobra_model = sampling_object.cobra_model_full.copy()    
+                    cobra_model = sampling_object.cobra_model_full.copy()
+                sampling_ids = sampling_object.the_reaction_ids_full
         else:
             if cobra_version == '0.2.0':
                 cobra_model = deepcopy(sampling_object.cobra_model_full)
             else:
-                cobra_model = sampling_object.cobra_model_full.copy()   
-        sampling_ids = sampling_object.the_reaction_ids_full
+                cobra_model = sampling_object.cobra_model_full.copy()
+            sampling_ids = sampling_object.the_reaction_ids_full
+        
             
         if 'solver' in kwargs:
             solver = check_solver(kwargs['solver'])
@@ -430,20 +435,27 @@ def achr_sampler(sampling_object, **kwargs):
                 if cobra_version == '0.2.0':
                     cobra_model = deepcopy(sampling_object.cobra_model_reduced)                    
                 else:
-                    cobra_model = sampling_object.cobra_model_reduced.copy()                
+                    cobra_model = sampling_object.cobra_model_reduced.copy()
+                sampling_ids = (sampling_object.the_reaction_ids_reduced)
+                ub = sampling_object.ub_reduced
+                lb = sampling_object.lb_reduced
             else:
                 if cobra_version == '0.2.0':
                     cobra_model = deepcopy(sampling_object.cobra_model_full)
                 else:
-                    cobra_model = sampling_object.cobra_model_full.copy()    
+                    cobra_model = sampling_object.cobra_model_full.copy()
+                sampling_ids = sampling_object.the_reaction_ids_full
+                ub = sampling_object.ub_full
+                lb = sampling_object.lb_full                
         else:
             if cobra_version == '0.2.0':
                 cobra_model = deepcopy(sampling_object.cobra_model_full)
             else:
-                cobra_model = sampling_object.cobra_model_full.copy()   
-        sampling_ids = sampling_object.the_reaction_ids_full
-        ub = sampling_object.ub_reduced
-        lb = sampling_object.lb_reduced           
+                cobra_model = sampling_object.cobra_model_full.copy()
+            sampling_ids = sampling_object.the_reaction_ids_full
+            ub = sampling_object.ub_full
+            lb = sampling_object.lb_full
+          
 
         if 'solver' in kwargs:
             solver = check_solver(kwargs['solver'])
@@ -1659,21 +1671,28 @@ def reduce_warmup_points(sampling_object, **kwargs):
         if kwargs['sample_reduced']:
             if cobra_version == '0.2.0':
                 cobra_model = deepcopy(sampling_object.cobra_model_reduced)
+
             else:
-                cobra_model = sampling_object.cobra_model_reduced.copy()                
+                cobra_model = sampling_object.cobra_model_reduced.copy()
+            sampling_ids = (sampling_object.the_reaction_ids_reduced)
+            ub = sampling_object.ub_reduced
+            lb = sampling_object.lb_reduced
         else:
             if cobra_version == '0.2.0':
                 cobra_model = deepcopy(sampling_object.cobra_model_full)
             else:
-                cobra_model = sampling_object.cobra_model_full.copy()    
+                cobra_model = sampling_object.cobra_model_full.copy()
+            sampling_ids = sampling_object.the_reaction_ids_full
+            ub = sampling_object.ub_full
+            lb = sampling_object.lb_full
     else:
         if cobra_version == '0.2.0':
             cobra_model = deepcopy(sampling_object.cobra_model_full)
         else:
-            cobra_model = sampling_object.cobra_model_full.copy()  
-    sampling_ids = sampling_object.the_reaction_ids_full
-    ub = sampling_object.ub_full
-    lb = sampling_object.lb_full     
+            cobra_model = sampling_object.cobra_model_full.copy()
+        sampling_ids = sampling_object.the_reaction_ids_full
+        ub = sampling_object.ub_full
+        lb = sampling_object.lb_full    
 
     warmup_points = sampling_object.warmup_points
     # Number of warmup points
