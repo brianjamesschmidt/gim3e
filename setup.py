@@ -16,8 +16,8 @@ setup(
     packages = find_packages(),
     #scripts = [''],
     setup_requires = [],
-    #install_requires = ['cobra>=0.2.0'],
-    install_requires = [],
+    install_requires = ['cobra>=0.2.0'],
+    #install_requires = [],
     extras_require = {},
 
     package_data = {'': ['*.txt', '*.html','LICENSE','README','data/*','examples/*py']},

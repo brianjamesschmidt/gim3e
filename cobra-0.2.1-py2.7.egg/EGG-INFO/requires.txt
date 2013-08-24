@@ -1,0 +1,10 @@
+
+
+[R]
+rpy2>=2.2.2
+
+[parallel]
+pp>=1.6.0
+
+[matlab]
+mlabwrap>=1.1

@@ -1,0 +1,14 @@
+setup.py
+gim3e/__init__.py
+gim3e/test_all.py
+gim3e.egg-info/PKG-INFO
+gim3e.egg-info/SOURCES.txt
+gim3e.egg-info/dependency_links.txt
+gim3e.egg-info/requires.txt
+gim3e.egg-info/top_level.txt
+gim3e/core/__init__.py
+gim3e/core/gim3e.py
+gim3e/sampling/__init__.py
+gim3e/sampling/gms.py
+gim3e/test/__init__.py
+gim3e/test/unit_tests.py
