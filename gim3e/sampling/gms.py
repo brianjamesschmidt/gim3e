@@ -1840,3 +1840,69 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
 
     return(the_converted_results, converted_reaction_list)
         
+def update_bounds(sampling_object, **kwargs):
+        """ Update the bounds for the sampling object based on a bounds_dict.
+        If warmup_points are available, these will be checked to make sure
+        they are included in the updated bounds.
+        
+        kwargs:
+         'bounds_dict': a dictionary of {reaction_id: {'upper_bound': value, 'lower_bound': value}}
+                        should not be reversible
+         'update_reduced': not fully implemented
+
+        """
+        from numpy import hstack, zeros, array, concatenate
+        from scipy import sparse
+        from copy import deepcopy
+        from cobra.core.Metabolite import Metabolite
+        from cobra.core.Reaction import Reaction
+        from time import time
+        import types
+        from math import floor
+        from numpy import zeros
+        import random
+            
+        if 'bounds_dict' in kwargs:
+            bounds_dict = (kwargs['bounds_dict'])
+        else:
+            bounds_dict = {}
+
+        enforce_warmup = True
+
+        if 'warmup_points' in dir(sampling_object):
+            use_warmup_points = True
+            warmup_points = sampling_object.warmup_points
+        else:
+            use_warmup_points = False
+            
+        if 'update_reduced' in kwargs:
+            if kwargs['update_reduced']:
+                cobra_model = (sampling_object.cobra_model_reduced)                    
+                sampling_ids = (sampling_object.the_reaction_ids_reduced)
+                ub = sampling_object.ub_reduced
+                lb = sampling_object.lb_reduced
+            else:
+                cobra_model = (sampling_object.cobra_model_full)
+                sampling_ids = sampling_object.the_reaction_ids_full
+                ub = sampling_object.ub_full
+                lb = sampling_object.lb_full                
+        else:
+            cobra_model = deepcopy(sampling_object.cobra_model_full)
+            sampling_ids = sampling_object.the_reaction_ids_full
+            ub = sampling_object.ub_full
+            lb = sampling_object.lb_full
+
+        for the_reaction_id in bounds_dict:
+            the_reaction_index = sampling_ids.index(the_reaction_id)
+            if use_warmup_points:
+                warmup_max = warmup_points[the_reaction_index,:].max()
+                warmup_min = warmup_points[the_reaction_index,:].min()
+                new_max = max(warmup_max, bounds_dict[the_reaction_id]['upper_bound'])
+                new_min = min(warmup_min, bounds_dict[the_reaction_id]['lower_bound'])
+            else:
+                new_max = (bounds_dict[the_reaction_id]['upper_bound'])
+                new_min = (bounds_dict[the_reaction_id]['lower_bound'])
+            cobra_model.reactions.get_by_id(the_reaction_id).upper_bound = new_max
+            cobra_model.reactions.get_by_id(the_reaction_id).lower_bound = new_min
+            ub[the_reaction_index] = new_max
+            lb[the_reaction_index] = new_min
