@@ -325,7 +325,7 @@ def create_warmup_points(sampling_object, **kwargs):
                 if verbose:
                     pass_s = time() - start_time
                     if n_warmup_pts_found > 0:
-                        remaining_s = (pass_s * n_points) / (n_warmup_pts_found)
+                        remaining_s = (pass_s  / n_warmup_pts_found) * (n_points - n_warmup_pts_found)
                     else:
                         remaining_s = (pass_s * n_points) 
                     remaining_h = floor((remaining_s)/3600)
@@ -1833,12 +1833,10 @@ def update_bounds(sampling_object, **kwargs):
             lb[the_reaction_index] = new_min
 
 
-def create_warmup_points_at_edges(sampling_object, **kwargs):
+def create_warmup_points_using_each_reaction(sampling_object, **kwargs):
         """ Create warm-up points for sampling.  This is an original implementation for gim3e
         that simply optimizes selected reactions to create the points near edges of the space.
-        This version is superseded
-         by a newer version of create_warmup_points() that makes
-        an attempt to randomize the point generation more.
+        A newer version of create_warmup_points() randomizes the point generation more.
 
         kwargs:
          'n_points': optional, will try to establish points to fully explore edges by FVA by default
