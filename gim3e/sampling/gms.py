@@ -1,6 +1,8 @@
 from cobra import solvers
 # Load these to help determine which solver solutions are OK
-acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance', 'x_bound_infeasible']
+acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance']
+# Removed 'x_bound_infeasible' as acceptable, this was causing problems when sampling.
+
 # May want to include this as acceptable when running cplex
 # if a small violation of the boundaries is OK: 'x_bound_infeasible'
 optimal_solution_strings = ['optimal']
@@ -65,7 +67,7 @@ def create_warmup_points(sampling_object, **kwargs):
          'sample_reduced': not fully implemented yet.
          'solver'
          'solver_tolerance'
-         'force_vms': this ensures virtual
+         'force_tms': this ensures virtual
                       metabolite sinks are included in
                       warmup optimization      
 
@@ -122,10 +124,10 @@ def create_warmup_points(sampling_object, **kwargs):
         else:
             tolerance_integer = 1E-9
 
-        if 'force_vms' in kwargs:
-            force_vms = kwargs['force_vms']
+        if 'force_tms' in kwargs:
+            force_tms = kwargs['force_tms']
         else:
-            force_vms = True
+            force_tms = True
 
         the_bounds = None
         continue_flag = True
@@ -135,7 +137,7 @@ def create_warmup_points(sampling_object, **kwargs):
         # random objective coefficients.
         # This will be all reactions except "IRRMILP_" reactions.
         test_dict = get_rev_optimization_partner_dict(cobra_model)
-        if not force_vms:
+        if not force_tms:
             if the_reaction_id.startswith("TMS_"):
                     test_dict.pop(the_reaction_id)
         test_reaction_id_list = test_dict.keys()
@@ -321,7 +323,6 @@ def create_warmup_points(sampling_object, **kwargs):
                     n_rows, n_warmup_pts_found = warmup_points.shape
 
                 # Move onto the next
-
                 if verbose:
                     pass_s = time() - start_time
                     if n_warmup_pts_found > 0:
@@ -330,17 +331,18 @@ def create_warmup_points(sampling_object, **kwargs):
                         remaining_s = (pass_s * n_points) 
                     remaining_h = floor((remaining_s)/3600)
                     remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
-                    print("Found "+ str(n_warmup_pts_found) + " of " + str(n_points) + " warmup points.  El: %0.0f s.  R: %0.0f hr %0.0f min." % (pass_s, remaining_h, remaining_m))                        
+                    print("Found "+ str(n_warmup_pts_found) + " of " + str(n_points) + " warmup points.  El: %0.0f s.  R: %0.0f hr %0.0f min." % (pass_s, remaining_h, remaining_m))
+
 
 
             irreversible_reaction_ids = []
             irreversible_reaction_indices = []
             irreversible_reaction_ub = []
             irreversible_reaction_lb = []
-            vms_reaction_ids = []
-            vms_reaction_indices = []
-            vms_reaction_ub = []
-            vms_reaction_lb = []
+            tms_reaction_ids = []
+            tms_reaction_indices = []
+            tms_reaction_ub = []
+            tms_reaction_lb = []
             reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
             
             penalty_reaction_id = 'penalty'
@@ -351,17 +353,17 @@ def create_warmup_points(sampling_object, **kwargs):
                     irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
                     irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
                 elif not x.startswith("IRRMILP_"):
-                    vms_reaction_ids.append(x)
-                    vms_reaction_indices.append(index)
-                    vms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    vms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+                    tms_reaction_ids.append(x)
+                    tms_reaction_indices.append(index)
+                    tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+                    tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
             reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, warmup_points)
             reversible_reaction_warmup_points_center = reversible_reaction_warmup_points.mean(1).reshape(len(reversible_reaction_ids),1)
             # import pdb
             # pdb.set_trace()
             reversible_reaction_warmup_points = 0.33 * reversible_reaction_warmup_points + 0.67 * reversible_reaction_warmup_points_center * ones((1, n_points))
             convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-            calc_vms_from_irrev_array = create_vms_from_irrev_conversion_array(vms_reaction_ids, irreversible_reaction_ids, cobra_model)
+            calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
 
             forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
             for index, the_reaction_id in enumerate(irreversible_reaction_ids):
@@ -374,7 +376,7 @@ def create_warmup_points(sampling_object, **kwargs):
                 cur_rev_point = reversible_reaction_warmup_points[:, the_point_index]
                 rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
                 cur_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                cur_vms_point = dot(calc_vms_from_irrev_array, cur_irrev_point)
+                cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
                 array_to_add_warmup_points = zeros((len(sampling_ids),1))
                 # Do it this way to set indicator rxns to nans since we aren't checking them
                 for the_index, the_id in enumerate(sampling_ids):
@@ -383,9 +385,9 @@ def create_warmup_points(sampling_object, **kwargs):
                     if the_id in irreversible_reaction_ids:
                         the_source_index = irreversible_reaction_ids.index(the_id)
                         the_value_warmup_points = cur_irrev_point[the_source_index]
-                    elif the_id in vms_reaction_ids:
-                        the_source_index = vms_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_vms_point[the_source_index]
+                    elif the_id in tms_reaction_ids:
+                        the_source_index = tms_reaction_ids.index(the_id)
+                        the_value_warmup_points = cur_tms_point[the_source_index]
                 array_to_add_warmup_points[the_index,0] = the_value_warmup_points
                 warmup_points = concatenate((warmup_points, array_to_add_warmup_points), axis=1)
 
@@ -530,12 +532,12 @@ def achr_sampler(sampling_object, **kwargs):
         # Extract the reaction data from the warmup points
         irreversible_reaction_ids = []
         irreversible_reaction_indices = []
-        vms_reaction_ids = []
-        vms_reaction_indices = []
+        tms_reaction_ids = []
+        tms_reaction_indices = []
         irreversible_reaction_ub = []
         irreversible_reaction_lb = []
-        vms_reaction_ub = []
-        vms_reaction_lb = []        
+        tms_reaction_ub = []
+        tms_reaction_lb = []        
         # penalty needs to be treated like the virtual metabolites
         penalty_reaction_id = 'penalty'
         for index, x in enumerate(sampling_ids):
@@ -545,12 +547,12 @@ def achr_sampler(sampling_object, **kwargs):
                 irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
                 irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)           
             elif not x.startswith("IRRMILP_"):
-                vms_reaction_ids.append(x)
-                vms_reaction_indices.append(index)
-                vms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                vms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-        vms_reaction_ub = array(vms_reaction_ub)
-        vms_reaction_lb = array(vms_reaction_lb)
+                tms_reaction_ids.append(x)
+                tms_reaction_indices.append(index)
+                tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+                tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+        tms_reaction_ub = array(tms_reaction_ub)
+        tms_reaction_lb = array(tms_reaction_lb)
 
         forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
         for index, the_reaction_id in enumerate(irreversible_reaction_ids):
@@ -559,7 +561,7 @@ def achr_sampler(sampling_object, **kwargs):
 
         # Make numpy arrays of the warmup data
         irreversible_reaction_warmup_points = warmup_points[irreversible_reaction_indices, :]
-        vms_reaction_warmup_points = warmup_points[vms_reaction_indices, :]
+        tms_reaction_warmup_points = warmup_points[tms_reaction_indices, :]
 
         # Compose the irreversible reaction matrix as a reversible 
         # format to better facilitate sampling calculations
@@ -569,13 +571,13 @@ def achr_sampler(sampling_object, **kwargs):
         reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, irreversible_reaction_warmup_points)
 
         convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-        calc_vms_from_irrev_array = create_vms_from_irrev_conversion_array(vms_reaction_ids, irreversible_reaction_ids, cobra_model)
+        calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
 
 
         # Construct an S matrix for calculating the null space
         # Need a list of reactions and metabolites
         # Basically, need to covert the model to reversible
-        # and remove VMS & penalty-type reactions
+        # and remove TMS & penalty-type reactions
         reversible_model = convert_to_reversible(cobra_model)
         
         # Rows are metabolites and cols are reactions
@@ -671,20 +673,20 @@ def achr_sampler(sampling_object, **kwargs):
                         if (n_over + n_under) < 1:
                              temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
                              cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
-                             if len(vms_reaction_ids) > 0:
-                                  cur_vms_point = dot(calc_vms_from_irrev_array, cur_irrev_point)
-                                  vms_out_of_bounds = (cur_vms_point > (vms_reaction_ub + edge_buffer_check_final)) | (cur_vms_point < (vms_reaction_lb - edge_buffer_check_final))
+                             if len(tms_reaction_ids) > 0:
+                                  cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
+                                  tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
                              else:
-                                 vms_out_of_bounds = [0]
+                                 tms_out_of_bounds = [0]
 
-                             if nsum(vms_out_of_bounds) < 1:
+                             if nsum(tms_out_of_bounds) < 1:
                                  # recalculate the center point
-                                 # print("Pass interim VMS check")
+                                 # print("Pass interim TMS check")
                                  previous_rev_point = cur_rev_point
                                  successful_steps += 1
                                  center_rev_point = ((n_warmup_points + successful_steps) * center_rev_point + cur_rev_point) / (n_warmup_points + successful_steps + 1)
                              #else:
-                                 # print("Failed on interim VMS check")
+                                 # print("Failed on interim TMS check")
                                  # Note a big reason for this may be the penalty if there is one.
                                  # So we will not update the point when this happens so we don't
                                  # wander into portions of the space that are not OK.
@@ -698,35 +700,35 @@ def achr_sampler(sampling_object, **kwargs):
                 # the points found so far
                 temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
                 cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
-                # Note that VMS reactions are effectively a non-convex constraint
+                # Note that TMS reactions are effectively a non-convex constraint
                 # for the reversible reaction solution space.
                 # Better to run the sampling algorithm, screen for valid points,
                 # the re-run.  In the future might want to
                 # explore good algorithms for non-convex spaces.
-                VMS_pass = True
-                if len(vms_reaction_ids) > 0:
-                    cur_vms_point = dot(calc_vms_from_irrev_array, cur_irrev_point)
-                    # Check the VMS is still in bounds.
-                    # Note that VMS requirements make the reversible
+                TMS_pass = True
+                if len(tms_reaction_ids) > 0:
+                    cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
+                    # Check the TMS is still in bounds.
+                    # Note that TMS requirements make the reversible
                     # axis space non-convex!
                     # This is an important check, this may fail since we didn't
                     # inform this when picking u.  May want to re-check the whole
                     # vector here
-                    vms_out_of_bounds = (cur_vms_point > (vms_reaction_ub + edge_buffer_check_final)) | (cur_vms_point < (vms_reaction_lb - edge_buffer_check_final))
-                    if nsum(vms_out_of_bounds) < 1:
+                    tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
+                    if nsum(tms_out_of_bounds) < 1:
                         previous_rev_point = cur_rev_point
-                        # print("Pass final VMS check")
+                        # print("Pass final TMS check")
                     else:
                         # Check that one of the older points is not better
                         test_rev_point = previous_rev_point
-                        VMS_pass = False
-                        print("Failed on final VMS check")
+                        TMS_pass = False
+                        print("Failed on final TMS check")
 
-                if VMS_pass:
+                if TMS_pass:
                     # Initial values for the point, keep to calculate mixing
                     rev_to_irrev = dot(convert_rev_to_irrev_array, initial_rev_point)
                     initial_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                    cur_vms_initial_point = dot(calc_vms_from_irrev_array, initial_irrev_point)
+                    cur_tms_initial_point = dot(calc_tms_from_irrev_array, initial_irrev_point)
                     array_to_add_sampled_points = zeros((len(sampling_ids)))
                     array_to_add_initial_points = zeros((len(sampling_ids)))
                     # Do it this way to set indicator rxns to nans since we aren't checking them
@@ -737,10 +739,10 @@ def achr_sampler(sampling_object, **kwargs):
                             the_source_index = irreversible_reaction_ids.index(the_id)
                             the_value_sampled_points = cur_irrev_point[the_source_index]
                             the_value_initial_points = initial_irrev_point[the_source_index]
-                        elif the_id in vms_reaction_ids:
-                            the_source_index = vms_reaction_ids.index(the_id)
-                            the_value_sampled_points = cur_vms_point[the_source_index]
-                            the_value_initial_points = cur_vms_initial_point[the_source_index]
+                        elif the_id in tms_reaction_ids:
+                            the_source_index = tms_reaction_ids.index(the_id)
+                            the_value_sampled_points = cur_tms_point[the_source_index]
+                            the_value_initial_points = cur_tms_initial_point[the_source_index]
                         array_to_add_sampled_points[the_index] = the_value_sampled_points
                         array_to_add_initial_points[the_index] = the_value_initial_points
                     sampled_points[:, n_valid_points] = array_to_add_sampled_points
@@ -1366,28 +1368,28 @@ def extract_rev_matrix_from_irrev(sampling_structure, the_matrix):
     # Extract the reaction data from the warmup points
     irreversible_reaction_ids = []
     irreversible_reaction_indices = []
-    vms_reaction_ids = []
-    vms_reaction_indices = []
+    tms_reaction_ids = []
+    tms_reaction_indices = []
     irreversible_reaction_ub = []
     irreversible_reaction_lb = []
-    vms_reaction_ub = []
-    vms_reaction_lb = []
+    tms_reaction_ub = []
+    tms_reaction_lb = []
     
     # penalty needs to be treated like the virtual metabolites
     penalty_reaction_id = 'penalty'
     for index, x in enumerate(sampling_ids):
-        if ((not x.startswith("IRRMILP_")) & (not x.startswith("VMS_")) & (not x == penalty_reaction_id)):
+        if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
             irreversible_reaction_ids.append(x)
             irreversible_reaction_indices.append(index)
             irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
             irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)           
         elif not x.startswith("IRRMILP_"):
-            vms_reaction_ids.append(x)
-            vms_reaction_indices.append(index)
-            vms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-            vms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-    vms_reaction_ub = array(vms_reaction_ub)
-    vms_reaction_lb = array(vms_reaction_lb)
+            tms_reaction_ids.append(x)
+            tms_reaction_indices.append(index)
+            tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+            tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+    tms_reaction_ub = array(tms_reaction_ub)
+    tms_reaction_lb = array(tms_reaction_lb)
 
     forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
     for index, the_reaction_id in enumerate(irreversible_reaction_ids):
@@ -1396,10 +1398,8 @@ def extract_rev_matrix_from_irrev(sampling_structure, the_matrix):
 
     # Make numpy arrays from the warmup data
     irreversible_reaction_matrix = the_matrix[irreversible_reaction_indices, :]
-    vms_reaction_matrix = the_matrix[vms_reaction_indices, :]
-    vms_reaction_ids = [sampling_ids[i] for i in vms_reaction_indices]
-    #ub_vms = [x for x in vms_reaction_ids ]
-    #lb_vms = 
+    tms_reaction_matrix = the_matrix[tms_reaction_indices, :]
+    tms_reaction_ids = [sampling_ids[i] for i in tms_reaction_indices]
 
     # Compose the irreversible reaction matrix as a reversible 
     # format to better facilitate sampling calculations
@@ -1451,10 +1451,10 @@ def extract_rev_matrix_from_irrev(sampling_structure, the_matrix):
                 ub_rev.append(ub_f)
                 lb_rev.append(lb_f)
 
-    reversible_matrix_points = vstack([reversible_reaction_warmup_points, vms_reaction_matrix])
-    reversible_reaction_ids += vms_reaction_ids
+    reversible_matrix_points = vstack([reversible_reaction_warmup_points, tms_reaction_matrix])
+    reversible_reaction_ids += tms_reaction_ids
                 
-    return reversible_matrix_points, reversible_reaction_ids, ub_rev, ub_rev, vms_reaction_matrix, vms_reaction_ids, 
+    return reversible_matrix_points, reversible_reaction_ids, ub_rev, ub_rev, tms_reaction_matrix, tms_reaction_ids, 
 
 
 def save_sampling_object(the_sampling_object, filename, path = ""):
@@ -1627,27 +1627,27 @@ def reduce_warmup_points(sampling_object, **kwargs):
     # Extract the reaction data from the warmup points
     irreversible_reaction_ids = []
     irreversible_reaction_indices = []
-    vms_reaction_ids = []
-    vms_reaction_indices = []
+    tms_reaction_ids = []
+    tms_reaction_indices = []
     irreversible_reaction_ub = []
     irreversible_reaction_lb = []
-    vms_reaction_ub = []
-    vms_reaction_lb = []        
+    tms_reaction_ub = []
+    tms_reaction_lb = []        
     # penalty needs to be treated like the virtual metabolites
     penalty_reaction_id = 'penalty'
     for index, x in enumerate(sampling_ids):
-        if ((not x.startswith("IRRMILP_")) & (not x.startswith("VMS_")) & (not x == penalty_reaction_id)):
+        if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
             irreversible_reaction_ids.append(x)
             irreversible_reaction_indices.append(index)
             irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
             irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)           
         elif not x.startswith("IRRMILP_"):
-            vms_reaction_ids.append(x)
-            vms_reaction_indices.append(index)
-            vms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-            vms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-    vms_reaction_ub = array(vms_reaction_ub)
-    vms_reaction_lb = array(vms_reaction_lb)
+            tms_reaction_ids.append(x)
+            tms_reaction_indices.append(index)
+            tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+            tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+    tms_reaction_ub = array(tms_reaction_ub)
+    tms_reaction_lb = array(tms_reaction_lb)
 
     forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
     for index, the_reaction_id in enumerate(irreversible_reaction_ids):
@@ -1655,7 +1655,7 @@ def reduce_warmup_points(sampling_object, **kwargs):
             forward_reaction_flag[index] = 1
 
     # Make numpy arrays of the numerical components of the warmup data [no binary]
-    test_matrix = sampling_object.warmup_points[irreversible_reaction_indices + vms_reaction_indices, :]
+    test_matrix = sampling_object.warmup_points[irreversible_reaction_indices + tms_reaction_indices, :]
     delete_indices = []
     do_not_delete_indices = []
 
@@ -2156,10 +2156,10 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
             irreversible_reaction_indices = []
             irreversible_reaction_ub = []
             irreversible_reaction_lb = []
-            vms_reaction_ids = []
-            vms_reaction_indices = []
-            vms_reaction_ub = []
-            vms_reaction_lb = []
+            tms_reaction_ids = []
+            tms_reaction_indices = []
+            tms_reaction_ub = []
+            tms_reaction_lb = []
             reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
             
             penalty_reaction_id = 'penalty'
@@ -2170,15 +2170,15 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
                     irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
                     irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
                 elif not x.startswith("IRRMILP_"):
-                    vms_reaction_ids.append(x)
-                    vms_reaction_indices.append(index)
-                    vms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    vms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+                    tms_reaction_ids.append(x)
+                    tms_reaction_indices.append(index)
+                    tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+                    tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
             reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, warmup_points)
             reversible_reaction_warmup_points_center = reversible_reaction_warmup_points.mean(1).reshape(len(reversible_reaction_ids),1)
             reversible_reaction_warmup_points = 0.33 * reversible_reaction_warmup_points + 0.67 * reversible_reaction_warmup_points_center * ones((1, n_points))
             convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-            calc_vms_from_irrev_array = create_vms_from_irrev_conversion_array(vms_reaction_ids, irreversible_reaction_ids, cobra_model)
+            calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
 
             forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
             for index, the_reaction_id in enumerate(irreversible_reaction_ids):
@@ -2191,7 +2191,7 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
                 cur_rev_point = reversible_reaction_warmup_points[:, the_point_index]
                 rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
                 cur_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                cur_vms_point = dot(calc_vms_from_irrev_array, cur_irrev_point)
+                cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
                 array_to_add_warmup_points = zeros((len(sampling_ids),1))
                 # Do it this way to set indicator rxns to nans since we aren't checking them
                 for the_index, the_id in enumerate(sampling_ids):
@@ -2200,9 +2200,9 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
                     if the_id in irreversible_reaction_ids:
                         the_source_index = irreversible_reaction_ids.index(the_id)
                         the_value_warmup_points = cur_irrev_point[the_source_index]
-                    elif the_id in vms_reaction_ids:
-                        the_source_index = vms_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_vms_point[the_source_index]
+                    elif the_id in tms_reaction_ids:
+                        the_source_index = tms_reaction_ids.index(the_id)
+                        the_value_warmup_points = cur_tms_point[the_source_index]
                 array_to_add_warmup_points[the_index,0] = the_value_warmup_points
                 warmup_points = concatenate((warmup_points, array_to_add_warmup_points), axis=1)
 
@@ -2289,9 +2289,9 @@ def create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_r
     return convert_rev_to_irrev_array
 
 
-def create_vms_from_irrev_conversion_array(vms_reaction_ids, irreversible_reaction_ids, cobra_model):
+def create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model):
     """ We also want a matrix to convert the irreversible fluxes to
-    VMS fluxes.
+    TMS fluxes.
 
 
     """
@@ -2299,18 +2299,18 @@ def create_vms_from_irrev_conversion_array(vms_reaction_ids, irreversible_reacti
 
     #  Repeat a similar trick, but don't need to
     # include the original irrev fluxes in the output vector
-    calc_vms_from_irrev_array = zeros((len(vms_reaction_ids), len(irreversible_reaction_ids)))
-    for the_vms_index in range(0, len(vms_reaction_ids)):
-        the_vms_id = vms_reaction_ids[the_vms_index]
-        the_vms = cobra_model.reactions.get_by_id(the_vms_id)
+    calc_tms_from_irrev_array = zeros((len(tms_reaction_ids), len(irreversible_reaction_ids)))
+    for the_tms_index in range(0, len(tms_reaction_ids)):
+        the_tms_id = tms_reaction_ids[the_tms_index]
+        the_tms = cobra_model.reactions.get_by_id(the_tms_id)
         # These should essentially be sink reactions with one element
-        the_vms_coeff = -1. * [the_vms._metabolites[x] for x in the_vms._metabolites.keys()][0]
-        the_vm_metabolite = [x for x in the_vms._metabolites.keys()][0]
+        the_tms_coeff = -1. * [the_tms._metabolites[x] for x in the_tms._metabolites.keys()][0]
+        the_vm_metabolite = [x for x in the_tms._metabolites.keys()][0]
         for the_reaction in the_vm_metabolite._reaction:
-            if the_reaction.id != the_vms_id:
+            if the_reaction.id != the_tms_id:
                 irr_index = irreversible_reaction_ids.index(the_reaction.id)
                 for the_metabolite in the_reaction._metabolites.keys():
                     if the_metabolite.id == the_vm_metabolite:
                         cur_vm_coeff = 1. * the_reaction._metabolites[the_metabolite]
-                        calc_vms_from_irrev_array[the_vms_index][irr_index] = cur_vm_coeff / the_vms_coeff
-    return calc_vms_from_irrev_array
+                        calc_tms_from_irrev_array[the_tms_index][irr_index] = cur_vm_coeff / the_tms_coeff
+    return calc_tms_from_irrev_array
