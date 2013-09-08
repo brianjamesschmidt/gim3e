@@ -56,346 +56,6 @@ class sample_container(Object):
             self.ub_reduced = [self.cobra_model_reduced.reactions.get_by_id(x).upper_bound for x in self.the_reaction_ids_reduced]
 
 
-def create_warmup_points(sampling_object, **kwargs):
-        """ Create warm-up points for sampling.
-
-        kwargs:
-         'n_points': optional, will try to establish points to fully explore edges by FVA by default
-          can try fewer or redundant samples if this is specified.  Generally don't want to specify
-          this, let the sampler optimize the selection.
-         'bias': not implemented yet
-         'sample_reduced': not fully implemented yet.
-         'solver'
-         'solver_tolerance'
-         'force_tms': this ensures virtual
-                      metabolite sinks are included in
-                      warmup optimization      
-
-
-        """
-        from numpy import hstack, zeros, array, concatenate, random, ones, dot, NAN
-        from scipy import sparse
-        from copy import deepcopy
-        from cobra.core.Metabolite import Metabolite
-        from cobra.core.Reaction import Reaction
-        from time import time
-        import types
-        from math import floor
-        from numpy import zeros
-
-        if 'sample_reduced' in kwargs:
-            if kwargs['sample_reduced']:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_reduced)
-                    
-                else:
-                    cobra_model = sampling_object.cobra_model_reduced.copy()
-                sampling_ids = sampling_object.the_reaction_ids_reduced
-            else:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_full)
-                    
-                else:
-                    cobra_model = sampling_object.cobra_model_full.copy()
-                sampling_ids = sampling_object.the_reaction_ids_full
-        else:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(sampling_object.cobra_model_full)
-            else:
-                cobra_model = sampling_object.cobra_model_full.copy()
-            sampling_ids = sampling_object.the_reaction_ids_full
-        
-            
-        if 'solver' in kwargs:
-            solver = check_solver(kwargs['solver'])
-        else:
-            solver = check_solver('cplex')
-
-        if 'solver_tolerance' not in kwargs:
-            solver_tolerance = 1E-7
-        else:
-            solver_tolerance = kwargs['solver_tolerance']
-        tolerance_optimality = solver_tolerance
-        tolerance_feasibility = solver_tolerance
-        tolerance_barrier = 0.0001 * solver_tolerance
-        if solver == 'cplex':
-            # We can set this to 0 in cplex
-            tolerance_integer = 0
-        else:
-            tolerance_integer = 1E-9
-
-        if 'force_tms' in kwargs:
-            force_tms = kwargs['force_tms']
-        else:
-            force_tms = True
-
-        the_bounds = None
-        continue_flag = True
-        print("Generating warm-up points...")
-
-        # Get the reactions to include when creating
-        # random objective coefficients.
-        # This will be all reactions except "IRRMILP_" reactions.
-        test_dict = get_rev_optimization_partner_dict(cobra_model)
-        if not force_tms:
-            if the_reaction_id.startswith("TMS_"):
-                    test_dict.pop(the_reaction_id)
-        test_reaction_id_list = test_dict.keys()
-        
-        if 'n_points' not in kwargs:
-            print('Number of warmup points not specified, using about 2x the number of axes.')
-            n_points = 2 * len(test_reaction_id_list)
-        else:
-            n_points = kwargs['n_points']
-            if ((n_points % 2 != 0) | (n_points < 2)):
-                print('Forcing the number of warmup points to be even...')
-                n_points = max(2, n_points + 1)
-
-        # Reseed the generator - come back to this
-        # the_seed = random.RandomState()
-        # random.RandomState(seed = the_seed)
-        random.seed()
-
-        warmup_points = zeros((len(sampling_ids), 0))
-
-        number_of_processes = 1
-        variability_dict = {}
-        # Not yet supported
-        if number_of_processes > 1:
-            print("This script developed for irreversible models is not set up for multiple processors.  Exiting...")
-            continue_flag = False
-
-        # Set up a hot start to speed things
-        else:
-            # If an objective is detected, will use it to generate a solution for hot-starting
-            nonzero_objective_dict = {x.id: x.objective_coefficient for x in cobra_model.reactions if abs(x.objective_coefficient) > 0}         
-            if (len(nonzero_objective_dict.keys()) > 0):
-                # kwargs_to_pass = kwargs + {objective_sense: 'maximize'}
-                best_solution = sampling_optimize(cobra_model,
-                    solver = solver,
-                    tolerance_optimality = tolerance_optimality,
-                    tolerance_feasibility = tolerance_feasibility,
-                    tolerance_barrier = tolerance_barrier,
-                    tolerance_integer = tolerance_integer)
-            else:        
-                # if so there's no objective
-                # set to get a hot-start
-                # solution for FVA runs           
-                candidates = cobra_model.reactions.query("biomass")
-                objective_reaction = None
-                for test_reaction in candidates:
-                    if ((test_reaction.upper_bound != 0) | (test_reaction.lower_bound != 0)):
-                        objective_reaction = test_reaction
-                if objective_reaction == None:
-                    print('Unable to identify an objective for hot-starting FVA solutions.  Exiting.')
-                    continue_flag = False
-                    best_solution = None
-                else:
-                    objective_reaction.objective_coefficient = 1.
-                    nonzero_objective_dict = {objective_reaction.id: 1}
-                    best_solution = sampling_optimize(cobra_model,
-                        solver = solver,
-                        objective_sense = 'maximize',
-                        new_objective = objective_reaction,
-                        tolerance_optimality = tolerance_optimality,
-                        tolerance_feasibility = tolerance_feasibility,
-                        tolerance_barrier = tolerance_barrier,
-                        tolerance_integer = tolerance_integer)
-
-            # Back up the optimal solution to access later
-            # optimized_model = deepcopy(cobra_model)
-            if cobra_version == '0.2.0':
-                optimized_model = deepcopy(cobra_model)
-            else:
-                optimized_model = cobra_model.copy()   
-            for x in nonzero_objective_dict.keys():
-                cobra_model.reactions.get_by_id(x).objective_coefficient = 0
-
-        #total_number_of_trials = len(the_sampling_guide)
-        if continue_flag:
-            verbose = True
-            if verbose:
-                start_time = time()
-
-            n_warmup_pts_found = 0
-            # STEP THROUGH REACTIONS
-            # Avoid duplicating warmup points 
-            while n_warmup_pts_found < n_points:
-                # the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0]
-                # the_reaction_coefficient_list = []
-                warmup_point_pair = zeros((len(sampling_ids), 0))
-                found_a_point_pair = False
-
-                while not found_a_point_pair:
-                    # We try to start with the best solution
-                    # but will have to start from scratch if we violate it
-                    # by altering the reverse reaction bounds.
-                    warmup_coefficients = 2. * (random.rand((len(test_reaction_id_list))) - 0.5)
-                    for the_multiplier in [1, -1]:
-                        first_try = True
-                        found_a_point = False
-                        the_solution = best_solution
-                        for x in sampling_ids:
-                            cobra_model.reactions.get_by_id(x).objective_coefficient = 0
-
-                        the_objective_dict = {}
-                        for the_reaction_index, the_reaction_id in enumerate(test_reaction_id_list):
-                            the_coefficient = the_multiplier * warmup_coefficients[the_reaction_index]
-                            #the_reaction.objective_coefficient = 1.
-                            if the_coefficient >= 0:
-                                the_maximize_reaction_id = test_dict[the_reaction_id]['maximize']
-                                the_maximize_reaction_sense = test_dict[the_reaction_id]['maximize_sense']
-                                the_reaction = cobra_model.reactions.get_by_id(the_maximize_reaction_id)
-                                if the_maximize_reaction_sense == 'maximize':
-                                    the_reaction.objective_coefficient = the_coefficient
-                                    the_objective_dict[the_reaction.id] = the_reaction.objective_coefficient
-                                if the_maximize_reaction_sense == 'minimize':
-                                    the_reaction.objective_coefficient = -1. * the_coefficient
-                                    the_objective_dict[the_reaction.id] = the_reaction.objective_coefficient
-                            else:
-                                the_minimize_reaction_id = test_dict[the_reaction_id]['minimize']
-                                the_minimize_reaction_sense = test_dict[the_reaction_id]['minimize_sense']
-                                the_reaction = cobra_model.reactions.get_by_id(the_minimize_reaction_id)
-                                if the_minimize_reaction_sense == 'minimize':
-                                    the_reaction.objective_coefficient = the_coefficient
-                                    the_objective_dict[the_reaction.id] = the_reaction.objective_coefficient
-                                if the_minimize_reaction_sense == 'maximize':
-                                    the_reaction.objective_coefficient = -1. * the_coefficient
-                                    the_objective_dict[the_reaction.id] = the_reaction.objective_coefficient
-                        while not found_a_point:
-
-                            the_result = sampling_optimize(cobra_model,
-                                                       solver = solver,
-                                                       objective_sense = 'maximize',
-                                                       # Need to include new_objective
-                                                       # here to update the_problem
-                                                       # when hot-starting.
-                                                       new_objective = the_objective_dict,
-                                                       the_problem = the_solution,
-                                                       tolerance_optimality = tolerance_optimality,
-                                                       tolerance_feasibility = tolerance_feasibility,
-                                                       tolerance_barrier = tolerance_barrier,
-                                tolerance_integer = tolerance_integer)
-
-                            if type(cobra_model.solution.f) != types.NoneType:
-                                if cobra_model.solution.status in optimal_solution_strings:
-                                    found_a_point = True
-                                    warmup_point_pair = concatenate((warmup_point_pair, zeros((len(sampling_ids),1))), axis=1)
-                                    for storage_index, the_current_reaction_id in enumerate(sampling_ids):
-                                         warmup_point_pair[storage_index, -1] = cobra_model.solution.x_dict[the_current_reaction_id]
-
-                            if (type(cobra_model.solution.f) == types.NoneType):
-                                # Reset the best_solution for future tries
-                                for the_objective_reaction in sampling_ids:
-                                    cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = 0
-                                    if the_reaction_id in nonzero_objective_dict.keys():
-                                        cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = nonzero_objective_dict[the_objective_reaction]
-                                best_solution = sampling_optimize(cobra_model,
-                                                              solver = solver,
-                                                              the_problem = None,
-                                                              new_objective = nonzero_objective_dict,
-                                                              tolerance_optimality = tolerance_optimality,
-                                                              tolerance_feasibility = tolerance_feasibility,
-                                                              tolerance_barrier = tolerance_barrier,
-                                    tolerance_integer = tolerance_integer)
-                                for the_reaction_id in sampling_ids:
-                                    the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
-                                    the_reaction.objective_coefficient = 0
-                                for the_reaction_id in the_objective_dict.keys():
-                                    the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
-                                    the_reaction.objective_coefficient = the_objective_dict[the_reaction_id]
-                                    
-
-                            if (not found_a_point) & (first_try == True):
-                                # Try this one more time but force solving from scratch
-                                the_solution = None
-                                first_try = False
-                            elif (not found_a_point) & (first_try == False):
-                                # Give up and move on
-                                found_a_point = True
-
-                            if found_a_point & (the_multiplier == -1):
-                                found_a_point_pair = True
-
-                if warmup_point_pair.shape[1] == 2:
-                    warmup_points = concatenate((warmup_points, warmup_point_pair), axis=1)
-                    sampling_object.warmup_points = warmup_points
-                    n_rows, n_warmup_pts_found = warmup_points.shape
-
-                # Move onto the next
-                if verbose:
-                    pass_s = time() - start_time
-                    if n_warmup_pts_found > 0:
-                        remaining_s = (pass_s  / n_warmup_pts_found) * (n_points - n_warmup_pts_found)
-                    else:
-                        remaining_s = (pass_s * n_points) 
-                    remaining_h = floor((remaining_s)/3600)
-                    remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
-                    print("Found "+ str(n_warmup_pts_found) + " of " + str(n_points) + " warmup points.  El: %0.0f s.  R: %0.0f hr %0.0f min." % (pass_s, remaining_h, remaining_m))
-
-
-
-            irreversible_reaction_ids = []
-            irreversible_reaction_indices = []
-            irreversible_reaction_ub = []
-            irreversible_reaction_lb = []
-            tms_reaction_ids = []
-            tms_reaction_indices = []
-            tms_reaction_ub = []
-            tms_reaction_lb = []
-            reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
-            
-            penalty_reaction_id = 'penalty'
-            for index, x in enumerate(sampling_ids):
-                if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
-                    irreversible_reaction_ids.append(x)
-                    irreversible_reaction_indices.append(index)
-                    irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-                elif not x.startswith("IRRMILP_"):
-                    tms_reaction_ids.append(x)
-                    tms_reaction_indices.append(index)
-                    tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-            reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, warmup_points)
-            reversible_reaction_warmup_points_center = reversible_reaction_warmup_points.mean(1).reshape(len(reversible_reaction_ids),1)
-            # import pdb
-            # pdb.set_trace()
-            reversible_reaction_warmup_points = 0.33 * reversible_reaction_warmup_points + 0.67 * reversible_reaction_warmup_points_center * ones((1, n_points))
-            convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-            calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
-
-            forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
-            for index, the_reaction_id in enumerate(irreversible_reaction_ids):
-                if not the_reaction_id.endswith('_reverse'):
-                    forward_reaction_flag[index] = 1
-
-            warmup_points = zeros((len(sampling_ids), 0))
-
-            for the_point_index in range(0, n_points):
-                cur_rev_point = reversible_reaction_warmup_points[:, the_point_index]
-                rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
-                cur_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
-                array_to_add_warmup_points = zeros((len(sampling_ids),1))
-                # Do it this way to set indicator rxns to nans since we aren't checking them
-                for the_index, the_id in enumerate(sampling_ids):
-                    the_value_sampled_points = NAN
-                    the_value_initial_points = NAN
-                    if the_id in irreversible_reaction_ids:
-                        the_source_index = irreversible_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_irrev_point[the_source_index]
-                    elif the_id in tms_reaction_ids:
-                        the_source_index = tms_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_tms_point[the_source_index]
-                array_to_add_warmup_points[the_index,0] = the_value_warmup_points
-                warmup_points = concatenate((warmup_points, array_to_add_warmup_points), axis=1)
-
-
-
-        return warmup_points
-
-
 def achr_sampler(sampling_object, **kwargs):
         """ Run the sampling.
         
@@ -1703,7 +1363,7 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     an irreversible format
 	
 	kwargs:
-	 type: type of points to convert, "sampled" or "warmup"
+	 type: type of points to convert, "sampled," "initial," or "warmup"
 
     Returns:
      the_converted_results
@@ -1724,12 +1384,15 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
 
     if the_result_type == "warmup":
 		sampled_matrix = sampling_container.warmup_points
+    elif the_result_type == "initial":
+		sampled_matrix = sampling_container.initial_points
     else:
 		sampled_matrix = sampling_container.sampled_points
     
     the_raw_reactions_to_convert = [x for x in sampling_container.the_reaction_ids_full if not x.startswith("IRRMILP_")]
     paired_reaction_dict = {}
     tested_reactions = []
+    converted_reaction_list = []
     for the_reaction_id in the_raw_reactions_to_convert:
         the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
         if the_reaction not in tested_reactions:
@@ -1742,9 +1405,9 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
                         the_key = the_reaction.reflection.id
                     the_values.append(the_reaction.reflection.id)
             paired_reaction_dict[the_key] = the_values
+            converted_reaction_list.append(the_key)
             tested_reactions += the_values
 
-    converted_reaction_list = paired_reaction_dict.keys()
     n_original_reactions, n_points = sampled_matrix.shape
     the_converted_results = zeros((len(converted_reaction_list), n_points))
     the_converted_results[:] = NaN
@@ -1834,10 +1497,8 @@ def update_bounds(sampling_object, **kwargs):
             lb[the_reaction_index] = new_min
 
 
-def create_warmup_points_individual_reaction_objectives(sampling_object, **kwargs):
-        """ Create warm-up points for sampling.  This is an original implementation for gim3e
-        that simply optimizes selected reactions to create the points near edges of the space.
-        A newer version of create_warmup_points() randomizes the point generation more.
+def create_warmup_points(sampling_object, **kwargs):
+        """ Create warm-up points for sampling.
 
         kwargs:
          'n_points': optional, will try to establish points to fully explore edges by FVA by default
@@ -1848,6 +1509,9 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
          'sample_reduced': not fully implemented yet.
          'solver'
          'solver_tolerance'
+         'start_with_individual_reactions': boolean, default True, whether
+         to completely randomize the warmup point optimization objectives or start with
+         individual reactions.
 
         """
         from numpy import hstack, zeros, array, concatenate, ones, dot, NAN
@@ -1901,6 +1565,11 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
         else:
             tolerance_integer = 1E-9
 
+        if 'start_with_individual_reactions' in kwargs:
+            start_with_individual_reactions = (kwargs['start_with_individual_reactions'])
+        else:
+            start_with_individual_reactions = True
+
 
         the_bounds = None
         continue_flag = True
@@ -1946,12 +1615,14 @@ def create_warmup_points_individual_reaction_objectives(sampling_object, **kwarg
         if 'n_points' not in kwargs:
             print('Number of warmup points not specified, selecting one max/min pair for each of the axes.')
             n_points = len(test_list) * 2
-            the_sampling_guide = test_list #random.sample(, n_points)
+            if start_with_individual_reactions:
+                the_sampling_guide = test_list #random.sample(, n_points)
             
         else:
             n_points = kwargs['n_points']
             n_points = int(round(n_points/2.) * 2)
-            the_sampling_guide = the_sampling_guide + random.sample(test_list, min(len(test_list), int(round(n_points/2.))))  
+            if start_with_individual_reactions:
+                the_sampling_guide = the_sampling_guide + random.sample(test_list, min(len(test_list), int(round(n_points/2.))))  
                           
         dim_x = len(sampling_ids)
         warmup_points = zeros((dim_x, 0))
@@ -2314,3 +1985,33 @@ def create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reacti
                         cur_vm_coeff = 1. * the_reaction._metabolites[the_metabolite]
                         calc_tms_from_irrev_array[the_tms_index][irr_index] = cur_vm_coeff / the_tms_coeff
     return calc_tms_from_irrev_array
+
+
+def calculate_const_ind_reversible(sampling_object):
+    """ Calcualte the constant indices for the reversible reactions.
+
+
+    """
+    the_reversible_points, the_reversible_list = convert_sampling_results_to_reversible(sampling_object, type = "warmup")
+    reaction_partner_dict = get_rev_optimization_partner_dict(sampling_object.cobra_model_full)
+    const_ind_reversible = sampling_object.const_ind
+    the_irreversible_list = sampling_object.the_reaction_ids_full
+    const_ind_reversible = []
+    
+    for the_reversible_index, the_reversible_id in enumerate(the_reversible_list):
+        the_reversible_dict = reaction_partner_dict[the_reversible_id]
+        if the_reversible_dict['maximize'] == the_reversible_dict['minimize']:
+            the_irreversible_index = the_irreversible_list.index(the_reversible_id)
+            if the_irreversible_index in const_ind_reversible:
+                const_ind_reversible.append(the_irreversible_index)
+        else:
+            the_irreversible_index_1 = the_irreversible_list.index(the_reversible_dict['maximize'])
+            the_irreversible_index_2 = the_irreversible_list.index(the_reversible_dict['minimize'])
+            if the_irreversible_index_1 in const_ind_reversible:
+                if the_irreversible_index_2 in const_ind_reversible:
+                    const_ind_reversible.append(the_irreversible_index)
+
+    return const_ind_reversible
+                
+        
+        
