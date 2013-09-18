@@ -58,12 +58,13 @@ class sample_container(Object):
 
 def achr_sampler(sampling_object, **kwargs):
         """ Run the sampling.
-        
+
         kwargs:
-         'n_points': number of points to sample, default is n_warmup_points
-         'nsteps_per_point': number of steps to make per point, default is n_warmup_points
-                             we used 200 before, this might be OK, check if the mixing fraction
-                             is around 0.5 with a test set of say 10 points,
+         'n_points': number of points to gather
+         'point_stopping_condition': how long to let sampling run for each point, default is n_warmup_points.
+                           Default is 2x the number of reversible axes.
+                           FYI: we used 200 before in the COBRA toolbox.
+                           If x < 1, this is treated as a mixing_frac to attempt to converge to
          'bias': not implemented
          'sample_reduced': not tested
          'solver_tolerance': some measure of the accuracy of the solver tolerance
@@ -72,6 +73,7 @@ def achr_sampler(sampling_object, **kwargs):
          'edge_buffer': how much buffer to leave around the boundaries.
                         default is just slightly larger than the solver tolerance .
          'n_cpus': maximum cpus to use, but parallel execution not yet implemented
+
 
         """
         from numpy import hstack, zeros, array, vstack, NAN
@@ -114,7 +116,6 @@ def achr_sampler(sampling_object, **kwargs):
             sampling_ids = sampling_object.the_reaction_ids_full
             ub = sampling_object.ub_full
             lb = sampling_object.lb_full
-          
 
         if 'solver' in kwargs:
             solver = check_solver(kwargs['solver'])
@@ -171,22 +172,34 @@ def achr_sampler(sampling_object, **kwargs):
         # Number of warmup points
         n_rxns_in_model, n_warmup_points = warmup_points.shape
 
+
+        # Compose the irreversible reaction matrix as a reversible 
+        # format to better facilitate sampling calculations
+        reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
+
         if 'n_points' in kwargs:
             n_points = kwargs['n_points']
         else:
-            n_points = n_warmup_points
+            n_points = round(len(reaction_partner_dict.keys()) * 2)
 
-        if 'n_steps_per_point' in kwargs:
-            n_steps_per_point = kwargs['n_steps_per_point']
+        if 'point_stopping_condition' in kwargs:
+            point_stopping_condition = kwargs['point_stopping_condition']
+            if point_stopping_condition >= 1:
+                point_stopping_type = 'n_steps'
+            else:
+                point_stopping_condition = kwargs['point_stopping_condition']
+                point_stopping_condition = max(abs(1 - point_stopping_condition), abs(point_stopping_condition))
+                point_stopping_type = 'mix_frac'
+                check_steps = round(len(reaction_partner_dict.keys()) * 0.5)
         else:
+            point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
+            point_stopping_type = 'n_steps'
             # Otherwise, we could give each warmup point a shot.
             # Can in theory pare this down to ~200 as in previous ACHR
-            # But this did not work well in preliminary testing
-            # I had OK results with 50% of the # of warmup points.
-            # 1.5x is even safer.
-            n_steps_per_point = round(n_warmup_points * 1.5)
-            # May want to increase n_warmup_points if
-            # mix_frac still looks bad
+            # By default I tie this to the number of reactions.
+            # In preliminary testing I had OK results with 50% of 
+            # the # of warmup points.  1.5x is even safer.
+            # May want to increase if mix_frac still looks bad
 
         print("Initializing matrices for sampling... ")        
         # Extract the reaction data from the warmup points
@@ -223,9 +236,6 @@ def achr_sampler(sampling_object, **kwargs):
         irreversible_reaction_warmup_points = warmup_points[irreversible_reaction_indices, :]
         tms_reaction_warmup_points = warmup_points[tms_reaction_indices, :]
 
-        # Compose the irreversible reaction matrix as a reversible 
-        # format to better facilitate sampling calculations
-        reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
 
 
         reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, irreversible_reaction_warmup_points)
@@ -274,11 +284,13 @@ def achr_sampler(sampling_object, **kwargs):
             n_valid_points = 0
             while n_valid_points < n_points:
                 attempted_steps_for_current_point = 0
-                # Create a randome step size vector
+                continue_moving_current_point = True
+                # Create a random step size vector
 
                 initial_rev_point = previous_rev_point + 0
-                
-                while attempted_steps_for_current_point < n_steps_per_point:
+
+                # attempted_steps_for_current_point < n_steps_per_point:
+                while continue_moving_current_point == True: 
         
                     attempted_steps_for_current_point += 1 
                     # Pick a random warmup point
@@ -326,7 +338,7 @@ def achr_sampler(sampling_object, **kwargs):
                                 cur_rev_point = dot(N_rev, dot(transpose(N_rev), cur_rev_point))
 
                         # Consider which points can be moved.  Just consider movable points 
-						# to avoid complications from numerical errors in stable points
+			# to avoid complications from numerical errors in stable points
                         n_over = nsum(cur_rev_point[valid_dir_rev_ind] > ub_rev[valid_dir_rev_ind])
                         n_under = nsum(cur_rev_point[valid_dir_rev_ind] < lb_rev[valid_dir_rev_ind])
                         
@@ -345,15 +357,37 @@ def achr_sampler(sampling_object, **kwargs):
                                  previous_rev_point = cur_rev_point
                                  successful_steps += 1
                                  center_rev_point = ((n_warmup_points + successful_steps) * center_rev_point + cur_rev_point) / (n_warmup_points + successful_steps + 1)
-                             #else:
+                             # else:
                                  # print("Failed on interim TMS check")
                                  # Note a big reason for this may be the penalty if there is one.
                                  # So we will not update the point when this happens so we don't
                                  # wander into portions of the space that are not OK.
                 
-                        #else:
+                        # else:
                              #print("Failed on interim border check")
 
+                    if point_stopping_type == 'n_steps':
+                        if attempted_steps_for_current_point >= point_stopping_condition:
+                            continue_moving_current_point = False
+                    else:
+                        # otherwise, point_stopping_type = mix_frac for current point
+                        # to save time we won't include TMS here
+                        if attempted_steps_for_current_point % check_steps == 0:
+                            if n_valid_points > 0:
+                                the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
+                                the_reversible_initial, the_reversible_initial_list = convert_sampling_results_to_reversible(sampling_object, type = "initial", dont_keep_list = ["penalty"], keep_tms = False)
+                                the_reversible_sampled, the_reversible_sampled_list_temp = concatenate_matrices_by_id(the_reversible_sampled[:, 0 : n_valid_points], the_reversible_sampled_list, previous_rev_point, reversible_model_reactions)
+                                the_reversible_initial, the_reversible_initial_list_temp = concatenate_matrices_by_id(the_reversible_initial[:, 0 : n_valid_points], the_reversible_initial_list, initial_rev_point, reversible_model_reactions)
+                                # As a shortcut, check for points that are not movable in the current step
+                                cur_ind_fixed = [i for i, x in  enumerate(u == 0) if x == True]
+                                # Do a quick check of the mixing fraction so far to make sure it looks OK
+                                const_ind_reversible = calculate_const_ind_reversible(sampling_object)
+                                mix_frac = mix_fraction(the_reversible_sampled, the_reversible_initial, fixed = cur_ind_fixed)
+                                if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
+                                    continue_moving_current_point = False
+                            else:
+                                continue_moving_current_point = False
+                                
                 # Test the last successful point found during the steps
                 cur_rev_point = previous_rev_point 
                 # Add the resulting point to
@@ -386,28 +420,9 @@ def achr_sampler(sampling_object, **kwargs):
 
                 if TMS_pass:
                     # Initial values for the point, keep to calculate mixing
-                    rev_to_irrev = dot(convert_rev_to_irrev_array, initial_rev_point)
-                    initial_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                    cur_tms_initial_point = dot(calc_tms_from_irrev_array, initial_irrev_point)
-                    array_to_add_sampled_points = zeros((len(sampling_ids)))
-                    array_to_add_initial_points = zeros((len(sampling_ids)))
-                    # Do it this way to set indicator rxns to nans since we aren't checking them
-                    for the_index, the_id in enumerate(sampling_ids):
-                        the_value_sampled_points = NAN
-                        the_value_initial_points = NAN
-                        if the_id in irreversible_reaction_ids:
-                            the_source_index = irreversible_reaction_ids.index(the_id)
-                            the_value_sampled_points = cur_irrev_point[the_source_index]
-                            the_value_initial_points = initial_irrev_point[the_source_index]
-                        elif the_id in tms_reaction_ids:
-                            the_source_index = tms_reaction_ids.index(the_id)
-                            the_value_sampled_points = cur_tms_point[the_source_index]
-                            the_value_initial_points = cur_tms_initial_point[the_source_index]
-                        array_to_add_sampled_points[the_index] = the_value_sampled_points
-                        array_to_add_initial_points[the_index] = the_value_initial_points
-                    sampled_points[:, n_valid_points] = array_to_add_sampled_points
+                    sampled_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, cur_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
                     sampling_object.sampled_points = sampled_points
-                    initial_points[:, n_valid_points] = array_to_add_initial_points
+                    initial_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, initial_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
                     sampling_object.initial_points = initial_points
                     
                     n_valid_points += 1
@@ -1364,6 +1379,8 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
 	
 	kwargs:
 	 type: type of points to convert, "sampled," "initial," or "warmup"
+         keep_tms: whether to keep TMS reactions.  default is true.
+         dont_keep_list: list of additional reaction ids not to keep 
 
     Returns:
      the_converted_results
@@ -1377,6 +1394,16 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
 		the_result_type = kwargs["type"]
     else:
 		the_result_type = "sampled"
+
+    if "dont_keep_list" in kwargs:
+		dont_keep_list = kwargs["dont_keep_list"]
+    else:
+		dont_keep_list = []
+
+    if "keep_tms" in kwargs:
+		keep_tms = kwargs["keep_tms"]
+    else:
+		keep_tms = True
 		
     # For now assume the full model will be converted to irreversible
     cobra_model = sampling_container.cobra_model_full
@@ -1426,6 +1453,23 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
             the_reverse_reaction = ''
             net_flux = sampled_matrix[the_forward_index, :]
         the_converted_results[the_final_index, :] = net_flux
+
+    if keep_tms == False:
+        discard_indices = []
+        keep_indices = [x for x in range(0, len(converted_reaction_list))]
+        for the_index in keep_indices:
+            if converted_reaction_list[the_index].startswith("TMS_"):
+                discard_indices.append(the_index)
+        keep_indices = [i for i in keep_indices if i not in discard_indices]
+        the_converted_results = the_converted_results[keep_indices, :]
+        converted_reaction_list = [converted_reaction_list[i] for i in keep_indices]
+
+    if len(dont_keep_list) > 0:
+        discard_indices = [i for i, the_test_reaction in enumerate(converted_reaction_list) if the_reaction_id in (dont_keep_list)]
+        keep_indices = [i for i in range(0, len(converted_reaction_list)) if i not in discard_indices]
+        the_converted_results = the_converted_results[keep_indices, :]
+        converted_reaction_list = [converted_reaction_list[i] for i in keep_indices]        
+        
 
     return(the_converted_results, converted_reaction_list)
         
@@ -2015,3 +2059,61 @@ def calculate_const_ind_reversible(sampling_object):
                 
         
         
+def calculate_array_to_add(convert_rev_to_irrev_array, initial_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids):
+    """ This function pieces the results from sampling back together in a properly
+    formatted new point for the array
+
+    
+    """
+
+    from numpy import dot, zeros, NAN
+    
+    rev_to_irrev = dot(convert_rev_to_irrev_array, initial_rev_point)
+    initial_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
+    cur_tms_initial_point = dot(calc_tms_from_irrev_array, initial_irrev_point)
+    array_to_add_initial_points = zeros((len(sampling_ids)))
+    # Do it this way to set indicator rxns to nans since we aren't checking them
+    for the_index, the_id in enumerate(sampling_ids):
+        the_value_sampled_points = NAN
+        the_value_initial_points = NAN
+        if the_id in irreversible_reaction_ids:
+            the_source_index = irreversible_reaction_ids.index(the_id)
+            the_value_initial_points = initial_irrev_point[the_source_index]
+        elif the_id in tms_reaction_ids:
+            the_source_index = tms_reaction_ids.index(the_id)
+            the_value_initial_points = cur_tms_initial_point[the_source_index]
+        array_to_add_initial_points[the_index] = the_value_initial_points
+
+
+    return array_to_add_initial_points
+
+
+def concatenate_matrices_by_id(the_matrix_1, the_matrix_1_row_id, the_matrix_2, the_matrix_2_row_id):
+    """ This function joins two matrices based on lists of row ids
+    
+    """
+    from numpy import reshape
+    if the_matrix_1.ndim == 1:
+        the_matrix_1 = reshape(the_matrix_1, (-1, 1))
+    if the_matrix_2.ndim == 1:
+        the_matrix_2 = reshape(the_matrix_2, (-1, 1))
+    
+    if the_matrix_1_row_id == the_matrix_2_row_id:
+        from numpy import concatenate
+        the_combined_list = the_matrix_1_row_id
+        the_combined_matrix = concatenate((the_matrix_1, the_matrix_2), axis=1)
+    else:
+        from numpy import zeros, NAN
+        the_combined_list = the_matrix_1_row_id
+        the_combined_list += [x for x in the_matrix_2_row_id if x not in the_matrix_1_row_id]
+        the_n_rows_1, the_n_cols_1 = the_matrix_1.shape()
+        the_n_rows_2, the_n_cols_2 = the_matrix_2.shape()
+        the_n_cols = the_n_cols_1 + the_n_rows_2
+        the_n_rows = len(the_combined_list)
+        the_combined_matrix = zeros((the_n_rows, the_n_cols))
+        the_combined_matrix[:] = NAN
+        the_indices_1 = [i for i, the_id in enumerate(the_combined_list) if the_id in the_matrix_1_row_id]
+        the_combined_matrix[ix_([the_indices_1], [i for i in range(0, the_n_cols_1)] )]
+        the_indices_2 = [i for i, the_id in enumerate(the_combined_list) if the_id in the_matrix_2_row_id]
+        the_combined_matrix[ix_([the_indices_2],[i for i in range(the_n_cols_1, the_n_cols)])]
+    return the_combined_matrix, the_combined_list    

@@ -62,11 +62,9 @@ gms.sampling_optimize(sampling_object.cobra_model_full, objective_sense = 'maxim
                    tolerance_barrier = 0.0001 * selected_tolerance,
                    tolerance_integer = 0)
 # make warmup points
-gms.create_warmup_points(sampling_object, solver = 'cplex', solver_tolerance = 1E-8, force_vms = True, additional_forced_reactions = ['penalty'])
-# get rid of redundant points
-gms.reduce_warmup_points(sampling_object, solver_tolerance = selected_tolerance)
+gms.create_warmup_points(sampling_object, solver = 'cplex', solver_tolerance = 1E-8)
 # sample
-gms.achr_sampler(sampling_object, solver = "cplex", solver_tolerance = 1E-8, max_time = 60 * 60 * 24, n_points = 1000)
+gms.achr_sampler(sampling_object, solver = "cplex", solver_tolerance = 1E-8, max_time = 60 * 60 * 24, n_points = 1000, point_stopping_condition = 0.52)
 gms.save_sampling_object(sampling_object, "sampling_trial_core")
 
 the_converted_results, converted_reaction_list = gms.convert_sampling_results_to_reversible(sampling_object)
@@ -78,14 +76,3 @@ for the_row_index, the_row_id in enumerate(converted_reaction_list):
         the_converted_result_dict[the_row_id][the_column_index] = the_converted_results[(the_row_index, the_column_index)]
 mix_frac = gms.mix_fraction(sampling_object.sampled_points, sampling_object.initial_points, fixed = sampling_object.const_ind)
 print(mix_frac)
-
-
-
-
-
-
-
-
-
-
-
