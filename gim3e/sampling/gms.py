@@ -1,3 +1,6 @@
+# TODO
+# This module is need of code cleanup/streamlining
+
 from cobra import solvers
 # Load these to help determine which solver solutions are OK
 acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance']
@@ -373,7 +376,9 @@ def achr_sampler(sampling_object, **kwargs):
                         # to save time we won't include TMS here
                         if attempted_steps_for_current_point % check_steps == 0:
                             if n_valid_points > 0:
+                                the_reversible_sampled[:, 0] = center_rev_point
                                 the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
+                                the_reversible_initial[:, 0] = center_rev_point
                                 the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
                                 
                                 # the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
@@ -399,8 +404,8 @@ def achr_sampler(sampling_object, **kwargs):
                             # const_ind_reversible = calculate_const_ind_reversible(sampling_object)
                             # Note the_reversible_sampled_list_temp == the_reversible_initial_list_temp
                             mix_frac = mix_fraction(the_reversible_sampled[:,0:(n_valid_points+2)], the_reversible_initial[:,0:(n_valid_points+2)], fixed = cur_ind_fixed)
-                            print(attempted_steps_for_current_point)
-                            print(mix_frac)
+                            # print(attempted_steps_for_current_point)
+                            # print(mix_frac)
                             #    import pdb
                             #    pdb.set_trace()
                             if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
