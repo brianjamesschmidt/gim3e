@@ -76,7 +76,7 @@ def achr_sampler(sampling_object, **kwargs):
 
 
         """
-        from numpy import hstack, zeros, array, vstack, NAN
+        from numpy import hstack, zeros, array, vstack, NAN, reshape
         from scipy import sparse, dot, r_, transpose
         from copy import deepcopy
         from cobra.core.Metabolite import Metabolite
@@ -84,7 +84,6 @@ def achr_sampler(sampling_object, **kwargs):
         from time import time
         import types
         from math import floor, sqrt
-        from numpy import zeros, NAN
         import random
 
         # First check all the kwargs
@@ -374,19 +373,40 @@ def achr_sampler(sampling_object, **kwargs):
                         # to save time we won't include TMS here
                         if attempted_steps_for_current_point % check_steps == 0:
                             if n_valid_points > 0:
-                                the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
-                                the_reversible_initial, the_reversible_initial_list = convert_sampling_results_to_reversible(sampling_object, type = "initial", dont_keep_list = ["penalty"], keep_tms = False)
-                                the_reversible_sampled, the_reversible_sampled_list_temp = concatenate_matrices_by_id(the_reversible_sampled[:, 0 : n_valid_points], the_reversible_sampled_list, previous_rev_point, reversible_model_reactions)
-                                the_reversible_initial, the_reversible_initial_list_temp = concatenate_matrices_by_id(the_reversible_initial[:, 0 : n_valid_points], the_reversible_initial_list, initial_rev_point, reversible_model_reactions)
-                                # As a shortcut, check for points that are not movable in the current step
-                                cur_ind_fixed = [i for i, x in  enumerate(u == 0) if x == True]
-                                # Do a quick check of the mixing fraction so far to make sure it looks OK
-                                const_ind_reversible = calculate_const_ind_reversible(sampling_object)
-                                mix_frac = mix_fraction(the_reversible_sampled, the_reversible_initial, fixed = cur_ind_fixed)
-                                if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
-                                    continue_moving_current_point = False
+                                the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
+                                the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
+                                
+                                # the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
+                                # the_reversible_initial, the_reversible_initial_list = convert_sampling_results_to_reversible(sampling_object, type = "initial", dont_keep_list = ["penalty"], keep_tms = False)
+                                # the_reversible_sampled, the_reversible_sampled_list = concatenate_matrices_by_id(the_reversible_sampled[:, 0 : n_valid_points], the_reversible_sampled_list, reshape(previous_rev_point, (-1, 1)), reversible_model_reactions)
+                                # the_reversible_initial, the_reversible_initial_list = concatenate_matrices_by_id(the_reversible_initial[:, 0 : n_valid_points], the_reversible_initial_list, reshape(initial_rev_point, (-1, 1)), reversible_model_reactions)
+
                             else:
+                                # Row ids are in reversible_model_reaction_ids
+                                the_reversible_sampled = zeros((len(reversible_model_reactions), (n_points + 1)))
+                                the_reversible_sampled[:] = NAN
+                                the_reversible_initial = zeros((len(reversible_model_reactions), (n_points + 1)))
+                                the_reversible_initial[:] = NAN
+                                the_reversible_sampled[:, 0] = center_rev_point
+                                the_reversible_sampled[:, 1] = previous_rev_point
+                                the_reversible_initial[:, 0] = center_rev_point
+                                the_reversible_initial[:, 1] = initial_rev_point
+    
+                            # As a shortcut, check for points that are not movable in the current step
+                            # rather than valid_dir_rev_ind, u == 0
+                            cur_ind_fixed = [i for i, x in  enumerate(u == 0) if x == True]
+                            # Do a quick check of the mixing fraction so far to make sure it looks OK
+                            # const_ind_reversible = calculate_const_ind_reversible(sampling_object)
+                            # Note the_reversible_sampled_list_temp == the_reversible_initial_list_temp
+                            mix_frac = mix_fraction(the_reversible_sampled[:,0:(n_valid_points+2)], the_reversible_initial[:,0:(n_valid_points+2)], fixed = cur_ind_fixed)
+                            print(attempted_steps_for_current_point)
+                            print(mix_frac)
+                            #    import pdb
+                            #    pdb.set_trace()
+                            if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
                                 continue_moving_current_point = False
+                        #else:
+                        #    continue_moving_current_point = False
                                 
                 # Test the last successful point found during the steps
                 cur_rev_point = previous_rev_point 
@@ -1416,10 +1436,13 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     else:
 		sampled_matrix = sampling_container.sampled_points
     
-    the_raw_reactions_to_convert = [x for x in sampling_container.the_reaction_ids_full if not x.startswith("IRRMILP_")]
+    the_raw_reactions_to_convert = [x for x in sampled_point_names if not x.startswith("IRRMILP_")]
     paired_reaction_dict = {}
     tested_reactions = []
     converted_reaction_list = []
+    #reversible_partner_dict = get_rev_optimization_partner_dict(sampling_container.cobra_model_full)
+    #reversible_reaction_ids = [x for x in sampling_container.the_reaction_ids_full if x in reversible_partner_dict.keys()]
+
     for the_reaction_id in the_raw_reactions_to_convert:
         the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
         if the_reaction not in tested_reactions:
@@ -1439,7 +1462,8 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     the_converted_results = zeros((len(converted_reaction_list), n_points))
     the_converted_results[:] = NaN
 
-    converted_reaction_list.sort()
+    # Maintain the order of reactions set by the sampling_container
+    # converted_reaction_list.sort()
     for the_final_index, the_key in enumerate(converted_reaction_list):
         the_forward_reaction = the_key
         the_forward_index = sampled_point_names.index(the_key)
@@ -1465,11 +1489,10 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
         converted_reaction_list = [converted_reaction_list[i] for i in keep_indices]
 
     if len(dont_keep_list) > 0:
-        discard_indices = [i for i, the_test_reaction in enumerate(converted_reaction_list) if the_reaction_id in (dont_keep_list)]
+        discard_indices = [i for i, the_test_reaction in enumerate(converted_reaction_list) if the_test_reaction in (dont_keep_list)]
         keep_indices = [i for i in range(0, len(converted_reaction_list)) if i not in discard_indices]
         the_converted_results = the_converted_results[keep_indices, :]
         converted_reaction_list = [converted_reaction_list[i] for i in keep_indices]        
-        
 
     return(the_converted_results, converted_reaction_list)
         
@@ -2092,6 +2115,7 @@ def concatenate_matrices_by_id(the_matrix_1, the_matrix_1_row_id, the_matrix_2, 
     """ This function joins two matrices based on lists of row ids
     
     """
+    
     from numpy import reshape
     if the_matrix_1.ndim == 1:
         the_matrix_1 = reshape(the_matrix_1, (-1, 1))
@@ -2103,17 +2127,17 @@ def concatenate_matrices_by_id(the_matrix_1, the_matrix_1_row_id, the_matrix_2, 
         the_combined_list = the_matrix_1_row_id
         the_combined_matrix = concatenate((the_matrix_1, the_matrix_2), axis=1)
     else:
-        from numpy import zeros, NAN
+        from numpy import zeros, NAN, ix_
         the_combined_list = the_matrix_1_row_id
         the_combined_list += [x for x in the_matrix_2_row_id if x not in the_matrix_1_row_id]
-        the_n_rows_1, the_n_cols_1 = the_matrix_1.shape()
-        the_n_rows_2, the_n_cols_2 = the_matrix_2.shape()
-        the_n_cols = the_n_cols_1 + the_n_rows_2
+        the_n_rows_1, the_n_cols_1 = the_matrix_1.shape
+        the_n_rows_2, the_n_cols_2 = the_matrix_2.shape
+        the_n_cols = the_n_cols_1 + the_n_cols_2
         the_n_rows = len(the_combined_list)
         the_combined_matrix = zeros((the_n_rows, the_n_cols))
         the_combined_matrix[:] = NAN
         the_indices_1 = [i for i, the_id in enumerate(the_combined_list) if the_id in the_matrix_1_row_id]
-        the_combined_matrix[ix_([the_indices_1], [i for i in range(0, the_n_cols_1)] )]
+        the_combined_matrix[ix_(the_indices_1, [i for i in range(0, the_n_cols_1)])] = the_matrix_1
         the_indices_2 = [i for i, the_id in enumerate(the_combined_list) if the_id in the_matrix_2_row_id]
-        the_combined_matrix[ix_([the_indices_2],[i for i in range(the_n_cols_1, the_n_cols)])]
+        the_combined_matrix[ix_(the_indices_2,[i for i in range(the_n_cols_1, the_n_cols)])] = the_matrix_2
     return the_combined_matrix, the_combined_list    
