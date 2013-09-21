@@ -193,6 +193,7 @@ def achr_sampler(sampling_object, **kwargs):
                 point_stopping_condition = max(abs(1 - point_stopping_condition), abs(point_stopping_condition))
                 point_stopping_type = 'mix_frac'
                 check_steps = round(len(reaction_partner_dict.keys()) * 0.5)
+                stop_steps = 100 * check_steps
         else:
             point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
             point_stopping_type = 'n_steps'
@@ -290,6 +291,8 @@ def achr_sampler(sampling_object, **kwargs):
                 # Create a random step size vector
 
                 initial_rev_point = previous_rev_point + 0
+                successful_steps_for_current_point = 0
+                
 
                 # attempted_steps_for_current_point < n_steps_per_point:
                 while continue_moving_current_point == True: 
@@ -328,7 +331,7 @@ def achr_sampler(sampling_object, **kwargs):
                     min_step = min_step_vec.max()
 
                     # Just move on: pick a new direction if the step is too small
-		    # Otherwise, we will to update
+		    # Otherwise, we will try to update
                     if not ((abs(min_step) < max_min_tol) & (abs(max_step) < max_min_tol)) | (min_step > max_step):
                         norm_step = random.random()
                         step_dist = (norm_step * (max_step - min_step)) + min_step
@@ -358,6 +361,7 @@ def achr_sampler(sampling_object, **kwargs):
                                  # print("Pass interim TMS check")
                                  previous_rev_point = cur_rev_point
                                  successful_steps += 1
+                                 successful_steps_for_current_point += 1
                                  center_rev_point = ((n_warmup_points + successful_steps) * center_rev_point + cur_rev_point) / (n_warmup_points + successful_steps + 1)
                              # else:
                                  # print("Failed on interim TMS check")
@@ -369,16 +373,16 @@ def achr_sampler(sampling_object, **kwargs):
                              #print("Failed on interim border check")
 
                     if point_stopping_type == 'n_steps':
-                        if attempted_steps_for_current_point >= point_stopping_condition:
+                        if successful_steps_for_current_point >= point_stopping_condition:
                             continue_moving_current_point = False
                     else:
                         # otherwise, point_stopping_type = mix_frac for current point
                         # to save time we won't include TMS here
-                        if attempted_steps_for_current_point % check_steps == 0:
+                        if (successful_steps_for_current_point > 0) & (successful_steps_for_current_point % check_steps == 0):
                             if n_valid_points > 0:
-                                the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
-                                the_reversible_initial[:, 0] = center_rev_point
+                                # the_reversible_sampled[:, 0] = center_rev_point
+                                the_reversible_sampled[:, n_valid_points + 1] = cur_rev_point
+                                # the_reversible_initial[:, 0] = center_rev_point
                                 the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
                                 
                                 # the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
@@ -393,7 +397,7 @@ def achr_sampler(sampling_object, **kwargs):
                                 the_reversible_initial = zeros((len(reversible_model_reactions), (n_points + 1)))
                                 the_reversible_initial[:] = NAN
                                 the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, 1] = previous_rev_point
+                                the_reversible_sampled[:, 1] = cur_rev_point
                                 the_reversible_initial[:, 0] = center_rev_point
                                 the_reversible_initial[:, 1] = initial_rev_point
     
@@ -410,8 +414,12 @@ def achr_sampler(sampling_object, **kwargs):
                             #    pdb.set_trace()
                             if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
                                 continue_moving_current_point = False
-                        #else:
-                        #    continue_moving_current_point = False
+
+                        elif successful_steps_for_current_point > stop_steps:
+                            successful_steps_for_current_point = 0
+                            attempted_steps_for_current_point = 0
+                            cur_rev_point = initial_rev_point
+                            print("Over step limit, reset.")
                                 
                 # Test the last successful point found during the steps
                 cur_rev_point = previous_rev_point 
