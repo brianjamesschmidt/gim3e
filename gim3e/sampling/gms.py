@@ -343,7 +343,7 @@ def achr_sampler(sampling_object, **kwargs):
                                 cur_rev_point = dot(N_rev, dot(transpose(N_rev), cur_rev_point))
 
                         # Consider which points can be moved.  Just consider movable points 
-			# to avoid complications from numerical errors in stable points
+						# to avoid complications from numerical errors in stable points
                         n_over = nsum(cur_rev_point[valid_dir_rev_ind] > ub_rev[valid_dir_rev_ind])
                         n_under = nsum(cur_rev_point[valid_dir_rev_ind] < lb_rev[valid_dir_rev_ind])
                         
@@ -381,7 +381,7 @@ def achr_sampler(sampling_object, **kwargs):
                         if (successful_steps_for_current_point > 0) & (successful_steps_for_current_point % check_steps == 0):
                             if n_valid_points > 0:
                                 # the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, n_valid_points + 1] = cur_rev_point
+                                the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
                                 # the_reversible_initial[:, 0] = center_rev_point
                                 the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
                                 
@@ -397,7 +397,7 @@ def achr_sampler(sampling_object, **kwargs):
                                 the_reversible_initial = zeros((len(reversible_model_reactions), (n_points + 1)))
                                 the_reversible_initial[:] = NAN
                                 the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, 1] = cur_rev_point
+                                the_reversible_sampled[:, 1] = previous_rev_point
                                 the_reversible_initial[:, 0] = center_rev_point
                                 the_reversible_initial[:, 1] = initial_rev_point
     
@@ -421,7 +421,8 @@ def achr_sampler(sampling_object, **kwargs):
                             cur_rev_point = initial_rev_point
                             print("Over step limit, reset.")
                                 
-                # Test the last successful point found during the steps
+                # Test the last successful point found during the steps, validated prev_rev_point as 
+				# acceptable by both TMS and either mix_frac or n_steps
                 cur_rev_point = previous_rev_point 
                 # Add the resulting point to
                 # the points found so far
@@ -436,18 +437,15 @@ def achr_sampler(sampling_object, **kwargs):
                 if len(tms_reaction_ids) > 0:
                     cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
                     # Check the TMS is still in bounds.
-                    # Note that TMS requirements make the reversible
-                    # axis space non-convex!
-                    # This is an important check, this may fail since we didn't
-                    # inform this when picking u.  May want to re-check the whole
-                    # vector here
+                    # This check is partially redundant with the TMS check performed
+					# during the iteration, but helps to make sure the point isn't
+					# included if no good steps were made
                     tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
                     if nsum(tms_out_of_bounds) < 1:
                         previous_rev_point = cur_rev_point
                         # print("Pass final TMS check")
                     else:
-                        # Check that one of the older points is not better
-                        test_rev_point = previous_rev_point
+                        # Check we don't fail this final check, if so we didn't identify any good points
                         TMS_pass = False
                         print("Failed on final TMS check")
 
