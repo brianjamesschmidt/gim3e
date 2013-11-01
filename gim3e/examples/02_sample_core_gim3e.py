@@ -54,7 +54,7 @@ gim3e_model, gim3e_FVA, penalty_score = gim3e.gim3e(cobra_model, expression_dict
 
 # Make a sampling object
 sampling_object = gms.sample_container(gim3e_model)
-gms.sampling_optimize(sampling_object.cobra_model_full, objective_sense = 'maximize', 
+gms.sampling_optimize(sampling_object.cobra_model, objective_sense = 'maximize', 
                    the_problem = None, solver = 'cplex',  
                    error_reporting = None,
                    tolerance_optimality = selected_tolerance, 

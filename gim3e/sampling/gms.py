@@ -1,5 +1,6 @@
 # TODO
-# This module is need of code cleanup/streamlining
+# This module is need of more 
+# code cleanup/streamlining
 
 from cobra import solvers
 # Load these to help determine which solver solutions are OK
@@ -24,457 +25,393 @@ class sample_container(Object):
         # TODO might want to clean up this class some more
         # but it works for now
         
-        self.cobra_model_full = full_cobra_model
+        self.cobra_model = full_cobra_model
 
         # Will keep critical information on this solution object
-        self.the_reaction_ids_full = [x.id for x in full_cobra_model.reactions]
-        self.lb_full = [full_cobra_model.reactions.get_by_id(x).lower_bound for x in self.the_reaction_ids_full]
-        self.ub_full = [full_cobra_model.reactions.get_by_id(x).upper_bound for x in self.the_reaction_ids_full]
-        self.const_ind = [index for index, x in enumerate(self.the_reaction_ids_full) if self.ub_full[index] == self.lb_full[index]]
-        self.const_values = [self.lb_full[x] for x in self.const_ind]
-        self.reduced_model = ''
-        self.the_reaction_ids_reduced = ''
-        self.lb_reduced = ''
-        self.ub_reduced = ''
-        
-    def make_reduced_model(self):
-        # TODO
-        # This is not tested/developed yet,
-        # but ideally we reduce the dimensionality here
-        # to remove inaccessible or fixed reactions
-        from copy import deepcopy
-        if type(self.reduced_model) == str:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(self.cobra_model_full)
-            else:
-                cobra_model = self.cobra_model_full.copy()
-            for reaction_ind in self.const_ind:
-                the_reaction_id = self.the_reaction_ids_full[reaction_ind]
-                delete_me = cobra_model.reactions.get_by_id(the_reaction_id)
-                delete_me.delete()
-                cobra_model.reactions.remove(delete_me)
-            self.cobra_model_reduced = cobra_model
-            self.the_reaction_ids_reduced = [x.id for x in cobra_model.reactions]
-            self.lb_reduced = [self.cobra_model_reduced.reactions.get_by_id(x).lower_bound for x in self.the_reaction_ids_reduced]
-            self.ub_reduced = [self.cobra_model_reduced.reactions.get_by_id(x).upper_bound for x in self.the_reaction_ids_reduced]
+        self.the_reaction_ids = [x.id for x in full_cobra_model.reactions]
+        self.lb = [full_cobra_model.reactions.get_by_id(x).lower_bound for x in self.the_reaction_ids]
+        self.ub = [full_cobra_model.reactions.get_by_id(x).upper_bound for x in self.the_reaction_ids]
+        self.const_ind = [index for index, x in enumerate(self.the_reaction_ids) if self.ub[index] == self.lb[index]]
+        self.const_values = [self.lb[x] for x in self.const_ind]
 
 
 def achr_sampler(sampling_object, **kwargs):
-        """ Run the sampling.
+    """ Run the sampling.
+    kwargs:
+     'n_points': number of points to gather
+     'point_stopping_condition': how long to let sampling run for each point, default is n_warmup_points.
+                       Default is 2x the number of reversible axes.
+                       FYI: we used 200 before in the COBRA toolbox.
+                       If x < 1, this is treated as a mixing_frac to attempt to converge to
+     'bias': not implemented
+     'solver_tolerance': some measure of the accuracy of the solver tolerance
+                         used to generate the warmup points is needed 
+     'max_time': execution will interrupt and points found will be returned.  
+     'edge_buffer': how much buffer to leave around the boundaries.
+                    default is just slightly larger than the solver tolerance .
+     'n_cpus': maximum cpus to use, but parallel execution not yet implemented
 
-        kwargs:
-         'n_points': number of points to gather
-         'point_stopping_condition': how long to let sampling run for each point, default is n_warmup_points.
-                           Default is 2x the number of reversible axes.
-                           FYI: we used 200 before in the COBRA toolbox.
-                           If x < 1, this is treated as a mixing_frac to attempt to converge to
-         'bias': not implemented
-         'sample_reduced': not tested
-         'solver_tolerance': some measure of the accuracy of the solver tolerance
-                             used to generate the warmup points is needed 
-         'max_time': execution will interrupt and points found will be returned.  
-         'edge_buffer': how much buffer to leave around the boundaries.
-                        default is just slightly larger than the solver tolerance .
-         'n_cpus': maximum cpus to use, but parallel execution not yet implemented
+    """
+    from numpy import hstack, zeros, array, vstack, NAN, reshape
+    from scipy import sparse, dot, r_, transpose
+    from copy import deepcopy
+    from cobra.core.Metabolite import Metabolite
+    from cobra.core.Reaction import Reaction
+    from time import time
+    import types
+    from math import floor, sqrt
+    import random
 
+    # First check all the kwargs
+    # n_ponts: set this equal to the warmup points
+    # bias: not implemented yet
 
-        """
-        from numpy import hstack, zeros, array, vstack, NAN, reshape
-        from scipy import sparse, dot, r_, transpose
-        from copy import deepcopy
-        from cobra.core.Metabolite import Metabolite
-        from cobra.core.Reaction import Reaction
-        from time import time
-        import types
-        from math import floor, sqrt
-        import random
+    if cobra_version == '0.2.0':
+        cobra_model = deepcopy(sampling_object.cobra_model)
+    else:
+        cobra_model = sampling_object.cobra_model.copy()
+    sampling_ids = sampling_object.the_reaction_ids
+    ub = sampling_object.ub
+    lb = sampling_object.lb
 
-        # First check all the kwargs
-        # n_ponts: set this equal to the warmup points
-        # bias: not implemented yet
+    if 'solver' in kwargs:
+        solver = check_solver(kwargs['solver'])
+    else:
+        solver = check_solver('glpk')
 
-        if 'sample_reduced' in kwargs:
-            if kwargs['sample_reduced']:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_reduced)                    
-                else:
-                    cobra_model = sampling_object.cobra_model_reduced.copy()
-                sampling_ids = (sampling_object.the_reaction_ids_reduced)
-                ub = sampling_object.ub_reduced
-                lb = sampling_object.lb_reduced
-            else:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_full)
-                else:
-                    cobra_model = sampling_object.cobra_model_full.copy()
-                sampling_ids = sampling_object.the_reaction_ids_full
-                ub = sampling_object.ub_full
-                lb = sampling_object.lb_full                
-        else:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(sampling_object.cobra_model_full)
-            else:
-                cobra_model = sampling_object.cobra_model_full.copy()
-            sampling_ids = sampling_object.the_reaction_ids_full
-            ub = sampling_object.ub_full
-            lb = sampling_object.lb_full
+    if 'solver_tolerance' not in kwargs:
+        solver_tolerance = 1E-7
+    else:
+        solver_tolerance = kwargs['solver_tolerance']
 
-        if 'solver' in kwargs:
-            solver = check_solver(kwargs['solver'])
-        else:
-            solver = check_solver('glpk')
+    # Tolerance for reprojecting the current point into the null space
+    null_space_tolerance = solver_tolerance * 1E-6
 
-        if 'solver_tolerance' not in kwargs:
-            solver_tolerance = 1E-7
-        else:
-            solver_tolerance = kwargs['solver_tolerance']
+    if 'max_time' in kwargs:
+        max_time = kwargs['max_time']
+    else:
+        max_time = 0
 
-        # Tolerance for reprojecting the current point into the null space
-        null_space_tolerance = solver_tolerance * 1E-6
-		
-        if 'max_time' in kwargs:
-            max_time = kwargs['max_time']
-        else:
-            max_time = 0
+    # Steps must be larger than this to be effective
+    if 'max_min_factor' in kwargs:
+        max_min_factor = kwargs['max_min_factor']
+    else:
+        max_min_factor = 1E-6
+    max_min_tol = solver_tolerance * max_min_factor
 
-	# Steps must be larger than this to be effective
-        if 'max_min_factor' in kwargs:
-            max_min_factor = kwargs['max_min_factor']
-        else:
-            max_min_factor = 1E-6
-        max_min_tol = solver_tolerance * max_min_factor
-        
-        # Ignore directions where the distance to the boundary
-	# is small when computing allowed
-        # steps.  Here, can be a bit more liberal.
-        # Note the defaults have been altered from the
-        # sampler for the MATLAB COBRA toolbox
-        if 'tolerance_u_factor' in kwargs:
-            tolerance_u_factor = kwargs['tolerance_u_factor']
-        else:
-            tolerance_u_factor = 1E-6
-        tolerance_u = solver_tolerance * tolerance_u_factor
+    # Ignore directions where the distance to the boundary
+    # is small when computing allowed
+    # steps.  Here, can be a bit more liberal.
+    # Note the defaults have been altered from the
+    # sampler for the MATLAB COBRA toolbox
+    if 'tolerance_u_factor' in kwargs:
+        tolerance_u_factor = kwargs['tolerance_u_factor']
+    else:
+        tolerance_u_factor = 1E-6
+    tolerance_u = solver_tolerance * tolerance_u_factor
 
-	# A check on the size of the 
-        # components of the unit step vector
-        # Small components are ignored when checking
-        # for how far the point can be moved
-        # Note the defaults have been altered from the
-        # sampler for the MATLAB COBRA toolbox
-        if 'tolerance_d_factor' in kwargs:
-            tolerance_d_factor = kwargs['tolerance_d_factor']
-        else:
-            tolerance_d_factor = 1E-6
-        tolerance_d = solver_tolerance * tolerance_d_factor
+    # A check on the size of the 
+    # components of the unit step vector
+    # Small components are ignored when checking
+    # for how far the point can be moved
+    # Note the defaults have been altered from the
+    # sampler for the MATLAB COBRA toolbox
+    if 'tolerance_d_factor' in kwargs:
+        tolerance_d_factor = kwargs['tolerance_d_factor']
+    else:
+        tolerance_d_factor = 1E-6
+    tolerance_d = solver_tolerance * tolerance_d_factor
 
-        # Final check buffer for the turnover metabolites
-        edge_buffer_check_final = 0
+    # Final check buffer for the turnover metabolites
+    edge_buffer_check_final = 0
 
-        warmup_points = sampling_object.warmup_points
-        # Number of warmup points
-        n_rxns_in_model, n_warmup_points = warmup_points.shape
+    warmup_points = sampling_object.warmup_points
+    # Number of warmup points
+    n_rxns_in_model, n_warmup_points = warmup_points.shape
 
+    # Compose the irreversible reaction matrix as a reversible 
+    # format to better facilitate sampling calculations
+    reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
 
-        # Compose the irreversible reaction matrix as a reversible 
-        # format to better facilitate sampling calculations
-        reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
+    if 'n_points' in kwargs:
+        n_points = kwargs['n_points']
+    else:
+        n_points = round(len(reaction_partner_dict.keys()) * 2)
 
-        if 'n_points' in kwargs:
-            n_points = kwargs['n_points']
-        else:
-            n_points = round(len(reaction_partner_dict.keys()) * 2)
-
-        if 'point_stopping_condition' in kwargs:
-            point_stopping_condition = kwargs['point_stopping_condition']
-            if point_stopping_condition >= 1:
-                point_stopping_type = 'n_steps'
-            else:
-                point_stopping_condition = kwargs['point_stopping_condition']
-                point_stopping_condition = max(abs(1 - point_stopping_condition), abs(point_stopping_condition))
-                point_stopping_type = 'mix_frac'
-                check_steps = round(len(reaction_partner_dict.keys()) * 0.5)
-                stop_steps = 100 * check_steps
-        else:
-            point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
+    if 'point_stopping_condition' in kwargs:
+        point_stopping_condition = kwargs['point_stopping_condition']
+        if point_stopping_condition >= 1:
             point_stopping_type = 'n_steps'
-            # Otherwise, we could give each warmup point a shot.
-            # Can in theory pare this down to ~200 as in previous ACHR
-            # By default I tie this to the number of reactions.
-            # In preliminary testing I had OK results with 50% of 
-            # the # of warmup points.  1.5x is even safer.
-            # May want to increase if mix_frac still looks bad
+        else:
+            point_stopping_condition = kwargs['point_stopping_condition']
+            point_stopping_condition = max(abs(1 - point_stopping_condition), abs(point_stopping_condition))
+            point_stopping_type = 'mix_frac'
+            check_steps = round(len(reaction_partner_dict.keys()) * 0.5)
+            stop_steps = 100 * check_steps
+    else:
+        point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
+        point_stopping_type = 'n_steps'
+        # Otherwise, we could give each warmup point a shot.
+        # Can in theory pare this down to ~200 as in previous ACHR
+        # By default I tie this to the number of reactions.
+        # In preliminary testing I had OK results with 50% of 
+        # the # of warmup points.  1.5x is even safer.
+        # May want to increase if mix_frac still looks bad
 
-        print("Initializing matrices for sampling... ")        
-        # Extract the reaction data from the warmup points
-        irreversible_reaction_ids = []
-        irreversible_reaction_indices = []
-        tms_reaction_ids = []
-        tms_reaction_indices = []
-        irreversible_reaction_ub = []
-        irreversible_reaction_lb = []
-        tms_reaction_ub = []
-        tms_reaction_lb = []        
-        # penalty needs to be treated like the virtual metabolites
-        penalty_reaction_id = 'penalty'
-        for index, x in enumerate(sampling_ids):
-            if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
-                irreversible_reaction_ids.append(x)
-                irreversible_reaction_indices.append(index)
-                irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)           
-            elif not x.startswith("IRRMILP_"):
-                tms_reaction_ids.append(x)
-                tms_reaction_indices.append(index)
-                tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-        tms_reaction_ub = array(tms_reaction_ub)
-        tms_reaction_lb = array(tms_reaction_lb)
+    print("Initializing matrices for sampling... ")        
+    # Extract the reaction data from the warmup points
+    irreversible_reaction_ids = []
+    irreversible_reaction_indices = []
+    tms_reaction_ids = []
+    tms_reaction_indices = []
+    irreversible_reaction_ub = []
+    irreversible_reaction_lb = []
+    tms_reaction_ub = []
+    tms_reaction_lb = []        
+    # penalty needs to be treated like the virtual metabolites
+    penalty_reaction_id = 'penalty'
+    for index, x in enumerate(sampling_ids):
+        if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
+            irreversible_reaction_ids.append(x)
+            irreversible_reaction_indices.append(index)
+            irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+            irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)           
+        elif not x.startswith("IRRMILP_"):
+            tms_reaction_ids.append(x)
+            tms_reaction_indices.append(index)
+            tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+            tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+    tms_reaction_ub = array(tms_reaction_ub)
+    tms_reaction_lb = array(tms_reaction_lb)
 
-        forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
-        for index, the_reaction_id in enumerate(irreversible_reaction_ids):
-            if not the_reaction_id.endswith('_reverse'):
-                forward_reaction_flag[index] = 1
+    forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
+    for index, the_reaction_id in enumerate(irreversible_reaction_ids):
+        if not the_reaction_id.endswith('_reverse'):
+            forward_reaction_flag[index] = 1
 
-        # Make numpy arrays of the warmup data
-        irreversible_reaction_warmup_points = warmup_points[irreversible_reaction_indices, :]
-        tms_reaction_warmup_points = warmup_points[tms_reaction_indices, :]
-
-
-
-        reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, irreversible_reaction_warmup_points)
-
-        convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-        calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
+    # Make numpy arrays of the warmup data
+    irreversible_reaction_warmup_points = warmup_points[irreversible_reaction_indices, :]
+    tms_reaction_warmup_points = warmup_points[tms_reaction_indices, :]
 
 
-        # Construct an S matrix for calculating the null space
-        # Need a list of reactions and metabolites
-        # Basically, need to covert the model to reversible
-        # and remove TMS & penalty-type reactions
-        reversible_model = convert_to_reversible(cobra_model)
-        
-        # Rows are metabolites and cols are reactions
-        # these should match 1:1 to the model, just need to preserve the order
-        reversible_model_reactions = [reversible_model.reactions.get_by_id(x) for x in reversible_reaction_ids]
-        S_matrix = make_S_matrix(reversible_model_reactions, reversible_model.metabolites)
-        N_rev = null(S_matrix)
+
+    reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, irreversible_reaction_warmup_points)
+
+    convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
+    calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
+
+
+    # Construct an S matrix for calculating the null space
+    # Need a list of reactions and metabolites
+    # Basically, need to covert the model to reversible
+    # and remove TMS & penalty-type reactions
+    reversible_model = convert_to_reversible(cobra_model)
+
+    # Rows are metabolites and cols are reactions
+    # these should match 1:1 to the model, just need to preserve the order
+    reversible_model_reactions = [reversible_model.reactions.get_by_id(x) for x in reversible_reaction_ids]
+    S_matrix = make_S_matrix(reversible_model_reactions, reversible_model.metabolites)
+    N_rev = null(S_matrix)
                             
-        ub_rev = array(ub_rev)
-        lb_rev = array(lb_rev)
-        center_rev_point = reversible_reaction_warmup_points.mean(1)
-        previous_rev_point = deepcopy(center_rev_point)
-        previous_center_rev_point = center_rev_point
+    ub_rev = array(ub_rev)
+    lb_rev = array(lb_rev)
+    center_rev_point = reversible_reaction_warmup_points.mean(1)
+    previous_rev_point = deepcopy(center_rev_point)
+    previous_center_rev_point = center_rev_point
 
-        # Just throw this in here, will use it to build in dummy checks later
-        continue_flag = True
+    # Just throw this in here, will use it to build in dummy checks later
+    continue_flag = True
 
-        # Pre-allocate memory for the resulting points
-        sampled_points = zeros((len(sampling_ids), n_points))
-        sampled_points[:] = NAN
-        initial_points = zeros((len(sampling_ids), n_points))
-        initial_points[:] = NAN
+    # Pre-allocate memory for the resulting points
+    sampled_points = zeros((len(sampling_ids), n_points))
+    sampled_points[:] = NAN
+    initial_points = zeros((len(sampling_ids), n_points))
+    initial_points[:] = NAN
 
-        successful_steps = 0.
-        from numpy import subtract as nsub
-        from numpy import divide as ndiv
-        from numpy import add as nadd
-        from numpy import sum as nsum
+    successful_steps = 0.
+    from numpy import subtract as nsub
+    from numpy import divide as ndiv
+    from numpy import add as nadd
+    from numpy import sum as nsum
 
-        random.seed()
-        if continue_flag:
-            print("Starting to sample...")
-            start_time = time()
-            n_valid_points = 0
-            while n_valid_points < n_points:
-                attempted_steps_for_current_point = 0
-                continue_moving_current_point = True
-                # Create a random step size vector
+    random.seed()
+    if continue_flag:
+        print("Starting to sample...")
+        start_time = time()
+        n_valid_points = 0
+        while n_valid_points < n_points:
+            attempted_steps_for_current_point = 0
+            continue_moving_current_point = True
+            # Create a random step size vector
 
-                initial_rev_point = previous_rev_point + 0
-                successful_steps_for_current_point = 0
+            initial_rev_point = previous_rev_point + 0
+            successful_steps_for_current_point = 0
                 
 
-                # attempted_steps_for_current_point < n_steps_per_point:
-                while continue_moving_current_point == True: 
+            # attempted_steps_for_current_point < n_steps_per_point:
+            while continue_moving_current_point == True: 
         
-                    attempted_steps_for_current_point += 1 
-                    # Pick a random warmup point
-                    random_point_id = random.sample([x for x in range(0, n_warmup_points)], 1)[0]
-                    random_rev_point = reversible_reaction_warmup_points[:, random_point_id]
+                attempted_steps_for_current_point += 1 
+                # Pick a random warmup point
+                random_point_id = random.sample([x for x in range(0, n_warmup_points)], 1)[0]
+                random_rev_point = reversible_reaction_warmup_points[:, random_point_id]
 
-                    # Get a direction from the center to the warmup
-                    u = random_rev_point - center_rev_point
-                    # Make this a unit length vector
-                    u = u / sqrt(dot(u,u))
+                # Get a direction from the center to the warmup
+                u = random_rev_point - center_rev_point
+                # Make this a unit length vector
+                u = u / sqrt(dot(u,u))
 
-                    # Calculate starting distances to upper and lower bounds             
-                    dist_ub = nsub(ub_rev, previous_rev_point)
-                    dist_lb = nsub(previous_rev_point, lb_rev)
+                # Calculate starting distances to upper and lower bounds             
+                dist_ub = nsub(ub_rev, previous_rev_point)
+                dist_lb = nsub(previous_rev_point, lb_rev)
 
-                    # Ignore if we start too close to a boundary
-                    # this avoids issues with small directions
-                    # Also ignore directions with no motion component
-                    valid_dir_rev_ind = (dist_ub > tolerance_u) & (dist_lb > tolerance_u) & (u != 0)
+                # Ignore if we start too close to a boundary
+                # this avoids issues with small directions
+                # Also ignore directions with no motion component
+                valid_dir_rev_ind = (dist_ub > tolerance_u) & (dist_lb > tolerance_u) & (u != 0)
 
-                    # Figure out positive and negative directions
-                    pos_direction = (u[valid_dir_rev_ind] > tolerance_d).nonzero()
-                    neg_direction = (u[valid_dir_rev_ind] < -1 * tolerance_d).nonzero()
+                # Figure out positive and negative directions
+                pos_direction = (u[valid_dir_rev_ind] > tolerance_d).nonzero()
+                neg_direction = (u[valid_dir_rev_ind] < -1 * tolerance_d).nonzero()
 
-                    # Figure out all the possible maximum and minimum step sizes
-                    ub_step_temp = ndiv(dist_ub[valid_dir_rev_ind], u[valid_dir_rev_ind])
-                    lb_step_temp = ndiv(-1*dist_lb[valid_dir_rev_ind], u[valid_dir_rev_ind])
-                    max_step_vec = r_[ub_step_temp[pos_direction], lb_step_temp[neg_direction]]
-                    min_step_vec = r_[lb_step_temp[pos_direction], ub_step_temp[neg_direction]]
+                # Figure out all the possible maximum and minimum step sizes
+                ub_step_temp = ndiv(dist_ub[valid_dir_rev_ind], u[valid_dir_rev_ind])
+                lb_step_temp = ndiv(-1*dist_lb[valid_dir_rev_ind], u[valid_dir_rev_ind])
+                max_step_vec = r_[ub_step_temp[pos_direction], lb_step_temp[neg_direction]]
+                min_step_vec = r_[lb_step_temp[pos_direction], ub_step_temp[neg_direction]]
 
-                    # Calculate the maximum steps in the direction of u until we hit a boundary
-                    max_step = max_step_vec.min()
-                    min_step = min_step_vec.max()
+                # Calculate the maximum steps in the direction of u until we hit a boundary
+                max_step = max_step_vec.min()
+                min_step = min_step_vec.max()
 
-                    # Just move on: pick a new direction if the step is too small
-		    # Otherwise, we will try to update
-                    if not ((abs(min_step) < max_min_tol) & (abs(max_step) < max_min_tol)) | (min_step > max_step):
-                        norm_step = random.random()
-                        step_dist = (norm_step * (max_step - min_step)) + min_step
-                        cur_rev_point = nadd(previous_rev_point, (step_dist * u))
-                        # Reproject the point to avoid accumulating numerical errors
-                        if attempted_steps_for_current_point % 25 == 0:
-                            if (((abs(dot(S_matrix, cur_rev_point))).max()) > (null_space_tolerance)):
-                                # Check only needed for magnitude, debugging, new should be smaller
-                                cur_rev_point = dot(N_rev, dot(transpose(N_rev), cur_rev_point))
+                # Just move on: pick a new direction if the step is too small
+                # Otherwise, we will try to update
+                if not ((abs(min_step) < max_min_tol) & (abs(max_step) < max_min_tol)) | (min_step > max_step):
+                    norm_step = random.random()
+                    step_dist = (norm_step * (max_step - min_step)) + min_step
+                    cur_rev_point = nadd(previous_rev_point, (step_dist * u))
+                    # Reproject the point to avoid accumulating numerical errors
+                    if attempted_steps_for_current_point % 25 == 0:
+                        if (((abs(dot(S_matrix, cur_rev_point))).max()) > (null_space_tolerance)):
+                            # Check only needed for magnitude, debugging, new should be smaller
+                            cur_rev_point = dot(N_rev, dot(transpose(N_rev), cur_rev_point))
 
-                        # Consider which points can be moved.  Just consider movable points 
-						# to avoid complications from numerical errors in stable points
-                        n_over = nsum(cur_rev_point[valid_dir_rev_ind] > ub_rev[valid_dir_rev_ind])
-                        n_under = nsum(cur_rev_point[valid_dir_rev_ind] < lb_rev[valid_dir_rev_ind])
+                    # Consider which points can be moved.  Just consider movable points 
+                    # to avoid complications from numerical errors in stable points
+                    n_over = nsum(cur_rev_point[valid_dir_rev_ind] > ub_rev[valid_dir_rev_ind])
+                    n_under = nsum(cur_rev_point[valid_dir_rev_ind] < lb_rev[valid_dir_rev_ind])
                         
-                        if (n_over + n_under) < 1:
-                             temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
-                             cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
-                             if len(tms_reaction_ids) > 0:
-                                  cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
-                                  tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
-                             else:
-                                 tms_out_of_bounds = [0]
+                    if (n_over + n_under) < 1:
+                         temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
+                         cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
+                         if len(tms_reaction_ids) > 0:
+                              cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
+                              tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
+                         else:
+                             tms_out_of_bounds = [0]
 
-                             if nsum(tms_out_of_bounds) < 1:
-                                 # recalculate the center point
-                                 # print("Pass interim TMS check")
-                                 previous_rev_point = cur_rev_point
-                                 successful_steps += 1
-                                 successful_steps_for_current_point += 1
-                                 center_rev_point = ((n_warmup_points + successful_steps) * center_rev_point + cur_rev_point) / (n_warmup_points + successful_steps + 1)
-                             # else:
-                                 # print("Failed on interim TMS check")
-                                 # Note a big reason for this may be the penalty if there is one.
-                                 # So we will not update the point when this happens so we don't
-                                 # wander into portions of the space that are not OK.
-                
-                        # else:
-                             #print("Failed on interim border check")
+                         if nsum(tms_out_of_bounds) < 1:
+                             # recalculate the center point
+                             # print("Pass interim TMS check")
+                             previous_rev_point = cur_rev_point
+                             successful_steps += 1
+                             successful_steps_for_current_point += 1
+                             center_rev_point = ((n_warmup_points + successful_steps) * center_rev_point + cur_rev_point) / (n_warmup_points + successful_steps + 1)
 
-                    if point_stopping_type == 'n_steps':
-                        if successful_steps_for_current_point >= point_stopping_condition:
-                            continue_moving_current_point = False
-                    else:
-                        # otherwise, point_stopping_type = mix_frac for current point
-                        # to save time we won't include TMS here
-                        if (successful_steps_for_current_point > 0) & (successful_steps_for_current_point % check_steps == 0):
-                            if n_valid_points > 0:
-                                # the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
-                                # the_reversible_initial[:, 0] = center_rev_point
-                                the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
-                                
-                                # the_reversible_sampled, the_reversible_sampled_list = convert_sampling_results_to_reversible(sampling_object, dont_keep_list = ["penalty"], keep_tms = False)
-                                # the_reversible_initial, the_reversible_initial_list = convert_sampling_results_to_reversible(sampling_object, type = "initial", dont_keep_list = ["penalty"], keep_tms = False)
-                                # the_reversible_sampled, the_reversible_sampled_list = concatenate_matrices_by_id(the_reversible_sampled[:, 0 : n_valid_points], the_reversible_sampled_list, reshape(previous_rev_point, (-1, 1)), reversible_model_reactions)
-                                # the_reversible_initial, the_reversible_initial_list = concatenate_matrices_by_id(the_reversible_initial[:, 0 : n_valid_points], the_reversible_initial_list, reshape(initial_rev_point, (-1, 1)), reversible_model_reactions)
+                if point_stopping_type == 'n_steps':
+                    if successful_steps_for_current_point >= point_stopping_condition:
+                        continue_moving_current_point = False
+                else:
+                    # otherwise, point_stopping_type = mix_frac for current point
+                    # to save time we won't include TMS here
+                    if (successful_steps_for_current_point > 0) & (successful_steps_for_current_point % check_steps == 0):
+                        if n_valid_points > 0:
+                            # the_reversible_sampled[:, 0] = center_rev_point
+                            the_reversible_sampled[:, n_valid_points + 1] = previous_rev_point
+                            # the_reversible_initial[:, 0] = center_rev_point
+                            the_reversible_initial[:, n_valid_points + 1] = initial_rev_point
 
-                            else:
-                                # Row ids are in reversible_model_reaction_ids
-                                the_reversible_sampled = zeros((len(reversible_model_reactions), (n_points + 1)))
-                                the_reversible_sampled[:] = NAN
-                                the_reversible_initial = zeros((len(reversible_model_reactions), (n_points + 1)))
-                                the_reversible_initial[:] = NAN
-                                the_reversible_sampled[:, 0] = center_rev_point
-                                the_reversible_sampled[:, 1] = previous_rev_point
-                                the_reversible_initial[:, 0] = center_rev_point
-                                the_reversible_initial[:, 1] = initial_rev_point
+                        else:
+                            # Row ids are in reversible_model_reaction_ids
+                            the_reversible_sampled = zeros((len(reversible_model_reactions), (n_points + 1)))
+                            the_reversible_sampled[:] = NAN
+                            the_reversible_initial = zeros((len(reversible_model_reactions), (n_points + 1)))
+                            the_reversible_initial[:] = NAN
+                            the_reversible_sampled[:, 0] = center_rev_point
+                            the_reversible_sampled[:, 1] = previous_rev_point
+                            the_reversible_initial[:, 0] = center_rev_point
+                            the_reversible_initial[:, 1] = initial_rev_point
     
-                            # As a shortcut, check for points that are not movable in the current step
-                            # rather than valid_dir_rev_ind, u == 0
-                            cur_ind_fixed = [i for i, x in  enumerate(u == 0) if x == True]
-                            # Do a quick check of the mixing fraction so far to make sure it looks OK
-                            # const_ind_reversible = calculate_const_ind_reversible(sampling_object)
-                            # Note the_reversible_sampled_list_temp == the_reversible_initial_list_temp
-                            mix_frac = mix_fraction(the_reversible_sampled[:,0:(n_valid_points+2)], the_reversible_initial[:,0:(n_valid_points+2)], fixed = cur_ind_fixed)
-                            # print(attempted_steps_for_current_point)
-                            # print(mix_frac)
-                            #    import pdb
-                            #    pdb.set_trace()
-                            if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
-                                continue_moving_current_point = False
+                        # As a shortcut, check for points that are not movable in the current step
+                        # rather than valid_dir_rev_ind, u == 0
+                        cur_ind_fixed = [i for i, x in  enumerate(u == 0) if x == True]
+                        # Do a quick check of the mixing fraction so far to make sure it looks OK
+                        # const_ind_reversible = calculate_const_ind_reversible(sampling_object)
+                        # Note the_reversible_sampled_list_temp == the_reversible_initial_list_temp
+                        mix_frac = mix_fraction(the_reversible_sampled[:,0:(n_valid_points+2)], the_reversible_initial[:,0:(n_valid_points+2)], fixed = cur_ind_fixed)
+                        if max((1 - mix_frac), mix_frac) <= point_stopping_condition:
+                            continue_moving_current_point = False
 
-                        elif successful_steps_for_current_point > stop_steps:
-                            successful_steps_for_current_point = 0
-                            attempted_steps_for_current_point = 0
-                            cur_rev_point = initial_rev_point
-                            print("Over step limit, reset.")
+                    elif successful_steps_for_current_point > stop_steps:
+                        successful_steps_for_current_point = 0
+                        attempted_steps_for_current_point = 0
+                        cur_rev_point = initial_rev_point
+                        print("Over step limit, reset.")
                                 
-                # Test the last successful point found during the steps, validated prev_rev_point as 
-				# acceptable by both TMS and either mix_frac or n_steps
-                cur_rev_point = previous_rev_point 
-                # Add the resulting point to
-                # the points found so far
-                temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
-                cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
-                # Note that TMS reactions are effectively a non-convex constraint
-                # for the reversible reaction solution space.
-                # Better to run the sampling algorithm, screen for valid points,
-                # the re-run.  In the future might want to
-                # explore good algorithms for non-convex spaces.
-                TMS_pass = True
-                if len(tms_reaction_ids) > 0:
-                    cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
-                    # Check the TMS is still in bounds.
-                    # This check is partially redundant with the TMS check performed
-					# during the iteration, but helps to make sure the point isn't
-					# included if no good steps were made
-                    tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
-                    if nsum(tms_out_of_bounds) < 1:
-                        previous_rev_point = cur_rev_point
-                        # print("Pass final TMS check")
-                    else:
-                        # Check we don't fail this final check, if so we didn't identify any good points
-                        TMS_pass = False
-                        print("Failed on final TMS check")
+            # Test the last successful point found during the steps, validated prev_rev_point as 
+            # acceptable by both TMS and either mix_frac or n_steps
+            cur_rev_point = previous_rev_point 
+            # Add the resulting point to
+            # the points found so far
+            temp_rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
+            cur_irrev_point = (((temp_rev_to_irrev * forward_reaction_flag) > 0) * temp_rev_to_irrev) - (((temp_rev_to_irrev * (1 - forward_reaction_flag)) < 0) * temp_rev_to_irrev)
+            # Note that TMS reactions are effectively a non-convex constraint
+            # for the reversible reaction solution space.
+            # Better to run the sampling algorithm, screen for valid points,
+            # the re-run.  In the future might want to
+            # explore good algorithms for non-convex spaces.
+            TMS_pass = True
+            if len(tms_reaction_ids) > 0:
+                cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
+                # Check the TMS is still in bounds.
+                # This check is partially redundant with the TMS check performed
+                # during the iteration, but helps to make sure the point isn't
+                # included if no good steps were made
+                tms_out_of_bounds = (cur_tms_point > (tms_reaction_ub + edge_buffer_check_final)) | (cur_tms_point < (tms_reaction_lb - edge_buffer_check_final))
+                if nsum(tms_out_of_bounds) < 1:
+                    previous_rev_point = cur_rev_point
+                    # print("Pass final TMS check")
+                else:
+                    # Check we don't fail this final check, if so we didn't identify any good points
+                    TMS_pass = False
+                    print("Failed on final TMS check")
 
-                if TMS_pass:
-                    # Initial values for the point, keep to calculate mixing
-                    sampled_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, cur_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
-                    sampling_object.sampled_points = sampled_points
-                    initial_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, initial_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
-                    sampling_object.initial_points = initial_points
+            if TMS_pass:
+                # Initial values for the point, keep to calculate mixing
+                sampled_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, cur_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
+                sampling_object.sampled_points = sampled_points
+                initial_points[:, n_valid_points] = calculate_array_to_add(convert_rev_to_irrev_array, initial_rev_point, forward_reaction_flag, calc_tms_from_irrev_array, sampling_ids, irreversible_reaction_ids, tms_reaction_ids)
+                sampling_object.initial_points = initial_points
+
+                n_valid_points += 1
                     
-                    n_valid_points += 1
-                    
-                    # This will probably take a while to run so alert the user every so often
-                    pass_s = time() - start_time
-                    pass_h = floor((pass_s)/3600)
-                    pass_m = floor(((pass_s)/3600 - pass_h) * 60)                         
-                    # remaining_s = pass_s * (len(the_reactions) - (the_index + 1)) / (the_index + 1)
-                    remaining_h = 0
-                    remaining_m = 0
-                    if max_time > 0:
-                        remaining_s = (max_time - pass_s)
-                        remaining_h = floor((remaining_s)/3600)
-                        remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
-                        if pass_s > max_time:
-                              return sampled_points
-                        print("Valid point " + str(n_valid_points) + " of " + str(n_points) + ". El time is: %0.0f hr %0.0f min; max re is: %0.0f hr %0.0f min." % (pass_h, pass_m, remaining_h, remaining_m))
-                    else:
-                        print("Identified valid point " + str(n_valid_points) + " of " + str(n_points) + ". Elapsed time is: %0.0f hr %0.0f min." % (pass_h, pass_m))
-        return sampled_points
+                # This will probably take a while to run so alert the user every so often
+                pass_s = time() - start_time
+                pass_h = floor((pass_s)/3600)
+                pass_m = floor(((pass_s)/3600 - pass_h) * 60)                         
+                # remaining_s = pass_s * (len(the_reactions) - (the_index + 1)) / (the_index + 1)
+                remaining_h = 0
+                remaining_m = 0
+                if max_time > 0:
+                    remaining_s = (max_time - pass_s)
+                    remaining_h = floor((remaining_s)/3600)
+                    remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
+                    if pass_s > max_time:
+                          return sampled_points
+                    print("Valid point " + str(n_valid_points) + " of " + str(n_points) + ". El time is: %0.0f hr %0.0f min; max re is: %0.0f hr %0.0f min." % (pass_h, pass_m, remaining_h, remaining_m))
+                else:
+                    print("Identified valid point " + str(n_valid_points) + " of " + str(n_points) + ". Elapsed time is: %0.0f hr %0.0f min." % (pass_h, pass_m))
+    return sampled_points
 
 
 
@@ -1068,8 +1005,8 @@ def extract_rev_matrix_from_irrev(sampling_structure, the_matrix):
     Useful for interpreting sampling results.
 
     """
-    sampling_ids = sampling_object.the_reaction_ids_full
-    cobra_model = sampling_object.cobra_model_full
+    sampling_ids = sampling_object.the_reaction_ids
+    cobra_model = sampling_object.cobra_model
 
     # Extract the reaction data from the warmup points
     irreversible_reaction_ids = []
@@ -1195,26 +1132,18 @@ def save_sampling_object(the_sampling_object, filename, path = ""):
     # code.  Will update the class whenever loading.
     sampling_dict = {}
 
-    if 'cobra_model_full' in dir(the_sampling_object):
-        sampling_dict['cobra_model_full'] = the_sampling_object.cobra_model_full    
+    if 'cobra_model' in dir(the_sampling_object):
+        sampling_dict['cobra_model'] = the_sampling_object.cobra_model
     if 'const_ind' in dir(the_sampling_object):
         sampling_dict['const_ind'] = the_sampling_object.const_ind    
     if 'const_values' in dir(the_sampling_object):
         sampling_dict['const_values'] = the_sampling_object.const_values       
-    if 'lb_full' in dir(the_sampling_object):
-        sampling_dict['lb_full'] = the_sampling_object.lb_full         
-    if 'the_reaction_ids_full' in dir(the_sampling_object):
-        sampling_dict['the_reaction_ids_full'] = the_sampling_object.the_reaction_ids_full
-    if 'ub_full' in dir(the_sampling_object):
-        sampling_dict['ub_full'] = the_sampling_object.ub_full
-    if 'reduced_model' in dir(the_sampling_object):
-        sampling_dict['reduced_model'] = the_sampling_object.reduced_model
-    if 'the_reaction_ids_reduced' in dir(the_sampling_object):
-        sampling_dict['the_reaction_ids_reduced'] = the_sampling_object.the_reaction_ids_reduced
-    if 'lb_reduced' in dir(the_sampling_object):
-        sampling_dict['lb_reduced'] = the_sampling_object.lb_reduced
-    if 'ub_reduced' in dir(the_sampling_object):
-        sampling_dict['ub_reduced'] = the_sampling_object.ub_reduced
+    if 'lb' in dir(the_sampling_object):
+        sampling_dict['lb'] = the_sampling_object.lb         
+    if 'the_reaction_ids' in dir(the_sampling_object):
+        sampling_dict['the_reaction_ids'] = the_sampling_object.the_reaction_ids
+    if 'ub' in dir(the_sampling_object):
+        sampling_dict['ub'] = the_sampling_object.ub
         
     fp = open(path + filename + ".pickle", "wb")
     cPickle.dump(sampling_dict, fp)
@@ -1239,7 +1168,7 @@ def load_sampling_object(filename, path = ""):
     the_sampling_dict = cPickle.load(fp)
     fp.close()
 
-    the_sampling_object = sample_container(the_sampling_dict['cobra_model_full'])
+    the_sampling_object = sample_container(the_sampling_dict['cobra_model'])
 
     # Update in case there were 
     # changes made to the object
@@ -1248,20 +1177,12 @@ def load_sampling_object(filename, path = ""):
         the_sampling_object.const_ind = sampling_dict['const_ind']
     if 'const_values' in dir(the_sampling_dict):
         the_sampling_object.const_values = sampling_dict['const_values']
-    if 'lb_full' in dir(the_sampling_dict):
-        the_sampling_object.lb_full = sampling_dict['lb_full']
-    if 'the_reaction_ids_full' in dir(the_sampling_dict):
-        the_sampling_object.the_reaction_ids_full = sampling_dict['the_reaction_ids_full']
-    if 'ub_full' in dir(the_sampling_dict):
-        the_sampling_object.ub_full = sampling_dict['ub_full']
-    if 'reduced_model' in dir(the_sampling_dict):
-        the_sampling_object.reduced_model = sampling_dict['reduced_model']
-    if 'the_reaction_ids_reduced' in dir(the_sampling_dict):
-        the_sampling_object.the_reaction_ids_reduced = sampling_dict['the_reaction_ids_reduced']
-    if 'lb_reduced' in dir(the_sampling_dict):
-        the_sampling_object.lb_reduced = sampling_dict['lb_reduced']
-    if 'ub_reduced' in dir(the_sampling_dict):
-        the_sampling_object.ub_reduced = sampling_dict['ub_reduced']
+    if 'lb' in dir(the_sampling_dict):
+        the_sampling_object.lb = sampling_dict['lb']
+    if 'the_reaction_ids' in dir(the_sampling_dict):
+        the_sampling_object.the_reaction_ids = sampling_dict['the_reaction_ids']
+    if 'ub' in dir(the_sampling_dict):
+        the_sampling_object.ub = sampling_dict['ub']
     
     if len(path) == 0:
         new_path = "."
@@ -1299,32 +1220,13 @@ def reduce_warmup_points(sampling_object, **kwargs):
     else:
         verbose = kwargs['verbose']        
 
-    if 'sample_reduced' in kwargs:
-        if kwargs['sample_reduced']:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(sampling_object.cobra_model_reduced)
-
-            else:
-                cobra_model = sampling_object.cobra_model_reduced.copy()
-            sampling_ids = (sampling_object.the_reaction_ids_reduced)
-            ub = sampling_object.ub_reduced
-            lb = sampling_object.lb_reduced
-        else:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(sampling_object.cobra_model_full)
-            else:
-                cobra_model = sampling_object.cobra_model_full.copy()
-            sampling_ids = sampling_object.the_reaction_ids_full
-            ub = sampling_object.ub_full
-            lb = sampling_object.lb_full
+    if cobra_version == '0.2.0':
+        cobra_model = deepcopy(sampling_object.cobra_model)
     else:
-        if cobra_version == '0.2.0':
-            cobra_model = deepcopy(sampling_object.cobra_model_full)
-        else:
-            cobra_model = sampling_object.cobra_model_full.copy()
-        sampling_ids = sampling_object.the_reaction_ids_full
-        ub = sampling_object.ub_full
-        lb = sampling_object.lb_full    
+        cobra_model = sampling_object.cobra_model.copy()
+    sampling_ids = sampling_object.the_reaction_ids
+    ub = sampling_object.ub
+    lb = sampling_object.lb
 
     warmup_points = sampling_object.warmup_points
     # Number of warmup points
@@ -1407,9 +1309,9 @@ def reduce_warmup_points(sampling_object, **kwargs):
 def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     """ Take sampling results and convert them from a reversible to
     an irreversible format
-	
-	kwargs:
-	 type: type of points to convert, "sampled," "initial," or "warmup"
+
+    kwargs:
+     type: type of points to convert, "sampled," "initial," or "warmup"
          keep_tms: whether to keep TMS reactions.  default is true.
          dont_keep_list: list of additional reaction ids not to keep 
 
@@ -1422,37 +1324,35 @@ def convert_sampling_results_to_reversible(sampling_container, **kwargs):
     from numpy import zeros, NaN
 
     if "type" in kwargs:
-		the_result_type = kwargs["type"]
+        the_result_type = kwargs["type"]
     else:
-		the_result_type = "sampled"
+        the_result_type = "sampled"
 
     if "dont_keep_list" in kwargs:
-		dont_keep_list = kwargs["dont_keep_list"]
+        dont_keep_list = kwargs["dont_keep_list"]
     else:
-		dont_keep_list = []
+        dont_keep_list = []
 
     if "keep_tms" in kwargs:
-		keep_tms = kwargs["keep_tms"]
+        keep_tms = kwargs["keep_tms"]
     else:
-		keep_tms = True
-		
+        keep_tms = True
+
     # For now assume the full model will be converted to irreversible
-    cobra_model = sampling_container.cobra_model_full
-    sampled_point_names = sampling_container.the_reaction_ids_full
+    cobra_model = sampling_container.cobra_model
+    sampled_point_names = sampling_container.the_reaction_ids
 
     if the_result_type == "warmup":
-		sampled_matrix = sampling_container.warmup_points
+        sampled_matrix = sampling_container.warmup_points
     elif the_result_type == "initial":
-		sampled_matrix = sampling_container.initial_points
+        sampled_matrix = sampling_container.initial_points
     else:
-		sampled_matrix = sampling_container.sampled_points
+        sampled_matrix = sampling_container.sampled_points
     
     the_raw_reactions_to_convert = [x for x in sampled_point_names if not x.startswith("IRRMILP_")]
     paired_reaction_dict = {}
     tested_reactions = []
     converted_reaction_list = []
-    #reversible_partner_dict = get_rev_optimization_partner_dict(sampling_container.cobra_model_full)
-    #reversible_reaction_ids = [x for x in sampling_container.the_reaction_ids_full if x in reversible_partner_dict.keys()]
 
     for the_reaction_id in the_raw_reactions_to_convert:
         the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
@@ -1515,7 +1415,6 @@ def update_bounds(sampling_object, **kwargs):
         kwargs:
          'bounds_dict': a dictionary of {reaction_id: {'upper_bound': value, 'lower_bound': value}}
                         should not be reversible
-         'update_reduced': not fully implemented
 
         """
         from numpy import hstack, zeros, array, concatenate
@@ -1542,22 +1441,10 @@ def update_bounds(sampling_object, **kwargs):
         else:
             use_warmup_points = False
             
-        if 'update_reduced' in kwargs:
-            if kwargs['update_reduced']:
-                cobra_model = (sampling_object.cobra_model_reduced)                    
-                sampling_ids = (sampling_object.the_reaction_ids_reduced)
-                ub = sampling_object.ub_reduced
-                lb = sampling_object.lb_reduced
-            else:
-                cobra_model = (sampling_object.cobra_model_full)
-                sampling_ids = sampling_object.the_reaction_ids_full
-                ub = sampling_object.ub_full
-                lb = sampling_object.lb_full                
-        else:
-            cobra_model = deepcopy(sampling_object.cobra_model_full)
-            sampling_ids = sampling_object.the_reaction_ids_full
-            ub = sampling_object.ub_full
-            lb = sampling_object.lb_full
+        cobra_model = deepcopy(sampling_object.cobra_model)
+        sampling_ids = sampling_object.the_reaction_ids
+        ub = sampling_object.ub
+        lb = sampling_object.lb
 
         for the_reaction_id in bounds_dict:
             the_reaction_index = sampling_ids.index(the_reaction_id)
@@ -1576,388 +1463,367 @@ def update_bounds(sampling_object, **kwargs):
 
 
 def create_warmup_points(sampling_object, **kwargs):
-        """ Create warm-up points for sampling.
+    """ Create warm-up points for sampling.
 
-        kwargs:
-         'n_points': optional, will try to establish points to fully explore edges by FVA by default
-          can try fewer or redundant samples if this is specified.  Generally don't want to specify
-          this, let the sampler optimize the selection to make sure max/min for all reactions
-          & TMs is included.
-         'bias': not implemented yet
-         'sample_reduced': not fully implemented yet.
-         'solver'
-         'solver_tolerance'
-         'start_with_individual_reactions': boolean, default True, whether
-         to completely randomize the warmup point optimization objectives or start with
-         individual reactions.
+    kwargs:
+     'n_points': optional, will try to establish points to fully explore edges by FVA by default
+      can try fewer or redundant samples if this is specified.  Generally don't want to specify
+      this, let the sampler optimize the selection to make sure max/min for all reactions
+      & TMs is included.
+     'bias': not implemented yet
+     'solver'
+     'solver_tolerance'
+     'start_with_individual_reactions': boolean, default True, whether
+     to completely randomize the warmup point optimization objectives or start with
+     individual reactions.
 
-        """
-        from numpy import hstack, zeros, array, concatenate, ones, dot, NAN
-        from scipy import sparse
-        from copy import deepcopy
-        from cobra.core.Metabolite import Metabolite
-        from cobra.core.Reaction import Reaction
-        from time import time
-        import types
-        from math import floor
-        from numpy import random as nrandom
-        import random
+    """
+    from numpy import hstack, zeros, array, concatenate, ones, dot, NAN
+    from scipy import sparse
+    from copy import deepcopy
+    from cobra.core.Metabolite import Metabolite
+    from cobra.core.Reaction import Reaction
+    from time import time
+    import types
+    from math import floor
+    from numpy import random as nrandom
+    import random
 
-        if 'sample_reduced' in kwargs:
-            if kwargs['sample_reduced']:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_reduced)
-                    
-                else:
-                    cobra_model = sampling_object.cobra_model_reduced.copy()
-                sampling_ids = sampling_object.the_reaction_ids_reduced
-            else:
-                if cobra_version == '0.2.0':
-                    cobra_model = deepcopy(sampling_object.cobra_model_full)
-                    
-                else:
-                    cobra_model = sampling_object.cobra_model_full.copy()
-                sampling_ids = sampling_object.the_reaction_ids_full
-        else:
-            if cobra_version == '0.2.0':
-                cobra_model = deepcopy(sampling_object.cobra_model_full)
-            else:
-                cobra_model = sampling_object.cobra_model_full.copy()
-            sampling_ids = sampling_object.the_reaction_ids_full
+    if cobra_version == '0.2.0':
+        cobra_model = deepcopy(sampling_object.cobra_model)
+    else:
+        cobra_model = sampling_object.cobra_model.copy()
+    sampling_ids = sampling_object.the_reaction_ids
             
-        if 'solver' in kwargs:
-            solver = check_solver(kwargs['solver'])
+    if 'solver' in kwargs:
+        solver = check_solver(kwargs['solver'])
+    else:
+        solver = check_solver('cplex')
+
+    if 'solver_tolerance' not in kwargs:
+        solver_tolerance = 1E-7
+    else:
+        solver_tolerance = kwargs['solver_tolerance']
+    tolerance_optimality = solver_tolerance
+    tolerance_feasibility = solver_tolerance
+    tolerance_barrier = 0.0001 * solver_tolerance
+    if solver == 'cplex':
+        # We can set this to 0 in cplex
+        tolerance_integer = 0
+    else:
+        tolerance_integer = 1E-9
+
+    if 'start_with_individual_reactions' in kwargs:
+        start_with_individual_reactions = (kwargs['start_with_individual_reactions'])
+    else:
+        start_with_individual_reactions = True
+
+    the_bounds = None
+    continue_flag = True
+    print("Generating warm-up points...")
+
+    # Don't include GIM3E MILP indicator type reactions
+    reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
+
+    # now pick the start-up reactions.  first make a list of lists:
+    # [rxn, min], [rxn, max]  then randomize the order &
+    # we will march through in the random order
+    test_list = []
+    random.seed()
+    for the_reaction in reaction_partner_dict.keys():
+        maximize_reaction = reaction_partner_dict[the_reaction]['maximize']
+        maximize_sense = reaction_partner_dict[the_reaction]['maximize_sense']
+        if maximize_sense == 'maximize':
+            maximize_coefficient = 1
         else:
-            solver = check_solver('cplex')
-
-        if 'solver_tolerance' not in kwargs:
-            solver_tolerance = 1E-7
+            maximize_coefficient = -1
+        minimize_reaction = reaction_partner_dict[the_reaction]['minimize']
+        minimize_sense = reaction_partner_dict[the_reaction]['minimize_sense']
+        if minimize_sense == 'maximize':
+            minimize_coefficient = 1
         else:
-            solver_tolerance = kwargs['solver_tolerance']
-        tolerance_optimality = solver_tolerance
-        tolerance_feasibility = solver_tolerance
-        tolerance_barrier = 0.0001 * solver_tolerance
-        if solver == 'cplex':
-            # We can set this to 0 in cplex
-            tolerance_integer = 0
+            minimize_coefficient = -1
+
+        if maximize_reaction != minimize_reaction:
+            maximize_set = [[maximize_reaction, minimize_reaction], [maximize_coefficient, minimize_coefficient * -1]]
         else:
-            tolerance_integer = 1E-9
+            maximize_set = [[maximize_reaction], [maximize_coefficient]]
 
-        if 'start_with_individual_reactions' in kwargs:
-            start_with_individual_reactions = (kwargs['start_with_individual_reactions'])
+        if minimize_reaction != maximize_reaction:
+            minimize_set = [[minimize_reaction, maximize_reaction], [minimize_coefficient, maximize_coefficient * -1]]
         else:
-            start_with_individual_reactions = True
+            minimize_set = [[minimize_reaction], [minimize_coefficient]]
 
+        # Couple the max/min, we will just keep a
+        # Result if the while max-min pair works out
+        test_list.append([maximize_set, minimize_set])
 
-        the_bounds = None
-        continue_flag = True
-        print("Generating warm-up points...")
-        
-        # Don't include GIM3E MILP indicator type reactions
-        reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
-
-        # now pick the start-up reactions.  first make a list of lists:
-        # [rxn, min], [rxn, max]  then randomize the order &
-        # we will march through in the random order
-        test_list = []
-        random.seed()
-        for the_reaction in reaction_partner_dict.keys():
-            maximize_reaction = reaction_partner_dict[the_reaction]['maximize']
-            maximize_sense = reaction_partner_dict[the_reaction]['maximize_sense']
-            if maximize_sense == 'maximize':
-                maximize_coefficient = 1
-            else:
-                maximize_coefficient = -1
-            minimize_reaction = reaction_partner_dict[the_reaction]['minimize']
-            minimize_sense = reaction_partner_dict[the_reaction]['minimize_sense']
-            if minimize_sense == 'maximize':
-                minimize_coefficient = 1
-            else:
-                minimize_coefficient = -1
-
-            if maximize_reaction != minimize_reaction:
-                maximize_set = [[maximize_reaction, minimize_reaction], [maximize_coefficient, minimize_coefficient * -1]]
-            else:
-                maximize_set = [[maximize_reaction], [maximize_coefficient]]
-
-            if minimize_reaction != maximize_reaction:
-                minimize_set = [[minimize_reaction, maximize_reaction], [minimize_coefficient, maximize_coefficient * -1]]
-            else:
-                minimize_set = [[minimize_reaction], [minimize_coefficient]]
-
-            # Couple the max/min, we will just keep a
-            # Result if the while max-min pair works out
-            test_list.append([maximize_set, minimize_set])
-
-        the_sampling_guide = []
-        if 'n_points' not in kwargs:
-            print('Number of warmup points not specified, selecting one max/min pair for each of the axes.')
-            n_points = len(test_list) * 2
-            if start_with_individual_reactions:
-                the_sampling_guide = test_list #random.sample(, n_points)
+    the_sampling_guide = []
+    if 'n_points' not in kwargs:
+        print('Number of warmup points not specified, selecting one max/min pair for each of the axes.')
+        n_points = len(test_list) * 2
+        if start_with_individual_reactions:
+            the_sampling_guide = test_list #random.sample(, n_points)
             
-        else:
-            n_points = kwargs['n_points']
-            n_points = int(round(n_points/2.) * 2)
-            if start_with_individual_reactions:
-                the_sampling_guide = the_sampling_guide + random.sample(test_list, min(len(test_list), int(round(n_points/2.))))  
+    else:
+        n_points = kwargs['n_points']
+        n_points = int(round(n_points/2.) * 2)
+        if start_with_individual_reactions:
+            the_sampling_guide = the_sampling_guide + random.sample(test_list, min(len(test_list), int(round(n_points/2.))))  
                           
-        dim_x = len(sampling_ids)
-        warmup_points = zeros((dim_x, 0))
+    dim_x = len(sampling_ids)
+    warmup_points = zeros((dim_x, 0))
 
-        number_of_processes = 1
-        variability_dict = {}
-        # Not yet supported
-        if number_of_processes > 1:
-            print("This script developed for irreversible models is not set up for multiple processors.  Exiting...")
-            continue_flag = False
+    number_of_processes = 1
+    variability_dict = {}
+    # Not yet supported
+    if number_of_processes > 1:
+        print("This script developed for irreversible models is not set up for multiple processors.  Exiting...")
+        continue_flag = False
 
-        # Set up a hot start to speed things
-        else:
-            # If an objective is detected, will use it to generate a solution for hot-starting
-            nonzero_objective_dict = {x.id: x.objective_coefficient for x in cobra_model.reactions if abs(x.objective_coefficient) > 0}         
-            if (len(nonzero_objective_dict.keys()) > 0):
-                # kwargs_to_pass = kwargs + {objective_sense: 'maximize'}
+    # Set up a hot start to speed things
+    else:
+        # If an objective is detected, will use it to generate a solution for hot-starting
+        nonzero_objective_dict = {x.id: x.objective_coefficient for x in cobra_model.reactions if abs(x.objective_coefficient) > 0}         
+        if (len(nonzero_objective_dict.keys()) > 0):
+            # kwargs_to_pass = kwargs + {objective_sense: 'maximize'}
+            best_solution = sampling_optimize(cobra_model,
+                solver = solver,
+                tolerance_optimality = tolerance_optimality,
+                tolerance_feasibility = tolerance_feasibility,
+                tolerance_barrier = tolerance_barrier,
+                tolerance_integer = tolerance_integer)
+        else:        
+            # if so there's no objective
+            # set to get a hot-start
+            # solution for FVA runs           
+            candidates = cobra_model.reactions.query("biomass")
+            objective_reaction = None
+            for test_reaction in candidates:
+                if ((test_reaction.upper_bound != 0) | (test_reaction.lower_bound != 0)):
+                    objective_reaction = test_reaction
+            if objective_reaction == None:
+                print('Unable to identify an objective for hot-starting FVA solutions.  Exiting.')
+                continue_flag = False
+                best_solution = None
+            else:
+                objective_reaction.objective_coefficient = 1.
+                nonzero_objective_dict = {objective_reaction.id: 1}
                 best_solution = sampling_optimize(cobra_model,
                     solver = solver,
+                    objective_sense = 'maximize',
+                    new_objective = objective_reaction,
                     tolerance_optimality = tolerance_optimality,
                     tolerance_feasibility = tolerance_feasibility,
                     tolerance_barrier = tolerance_barrier,
                     tolerance_integer = tolerance_integer)
-            else:        
-                # if so there's no objective
-                # set to get a hot-start
-                # solution for FVA runs           
-                candidates = cobra_model.reactions.query("biomass")
-                objective_reaction = None
-                for test_reaction in candidates:
-                    if ((test_reaction.upper_bound != 0) | (test_reaction.lower_bound != 0)):
-                        objective_reaction = test_reaction
-                if objective_reaction == None:
-                    print('Unable to identify an objective for hot-starting FVA solutions.  Exiting.')
-                    continue_flag = False
-                    best_solution = None
-                else:
-                    objective_reaction.objective_coefficient = 1.
-                    nonzero_objective_dict = {objective_reaction.id: 1}
-                    best_solution = sampling_optimize(cobra_model,
-                        solver = solver,
-                        objective_sense = 'maximize',
-                        new_objective = objective_reaction,
-                        tolerance_optimality = tolerance_optimality,
-                        tolerance_feasibility = tolerance_feasibility,
-                        tolerance_barrier = tolerance_barrier,
-                        tolerance_integer = tolerance_integer)
 
-            # Back up the optimal solution to access later
+        # Back up the optimal solution to access later
+        optimized_model = deepcopy(cobra_model)
+        if cobra_version == '0.2.0':
             optimized_model = deepcopy(cobra_model)
-            if cobra_version == '0.2.0':
-                optimized_model = deepcopy(cobra_model)
-            else:
-                optimized_model = cobra_model.copy()   
-            sampling_ids = sampling_object.the_reaction_ids_full
-            for x in nonzero_objective_dict.keys():
-                cobra_model.reactions.get_by_id(x).objective_coefficient = 0
+        else:
+            optimized_model = cobra_model.copy()   
+        sampling_ids = sampling_object.the_reaction_ids
+        for x in nonzero_objective_dict.keys():
+            cobra_model.reactions.get_by_id(x).objective_coefficient = 0
 
-        nrandom.seed()
-        if continue_flag:
-            verbose = True
-            if verbose:
-                start_time = time()
+    nrandom.seed()
+    if continue_flag:
+        verbose = True
+        if verbose:
+            start_time = time()
 
-            test_reaction_id_list = reaction_partner_dict.keys()
-            n_warmup_pts_found = 1
-            number_trials_complete = 0
-            # STEP THROUGH REACTIONS
-            # Avoid duplicating warmup points
-            while n_warmup_pts_found < n_points:
-                # the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0]
-                # the_reaction_coefficient_list = []
+        test_reaction_id_list = reaction_partner_dict.keys()
+        n_warmup_pts_found = 1
+        number_trials_complete = 0
+        # STEP THROUGH REACTIONS
+        # Avoid duplicating warmup points
+        while n_warmup_pts_found < n_points:
+            # the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0]
+            # the_reaction_coefficient_list = []
 
-                warmup_point_pair = zeros((len(sampling_ids), 0))
-                found_a_point_pair = False
+            warmup_point_pair = zeros((len(sampling_ids), 0))
+            found_a_point_pair = False
 
-                
-                while not found_a_point_pair:
-                    the_objective_dict = {}
-                    for x in sampling_ids:
-                        cobra_model.reactions.get_by_id(x).objective_coefficient = 0
-                    # We try to start with the best solution
-                    # but will have to start from scratch if we violate it
-                    # by altering the reverse reaction bounds.
-                    if len(the_sampling_guide) > 0:
-                        for the_multiplier in [1, -1]:
-                            the_objective_dict[the_multiplier] = {}
-                            if the_multiplier == 1:
-                                the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0][0]
-                            else:
-                                the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0][1]
-                            for the_reaction_id in sampling_ids:
-                                if the_reaction_id in the_sample_reaction_id_list:
-                                    the_index = the_sample_reaction_id_list.index(the_reaction_id)
-                                    the_objective_dict[the_multiplier][the_reaction_id] = the_sample_reactions_coefficients[the_index]
-                                else:
-                                    the_objective_dict[the_multiplier][the_reaction_id] = 0
-                        the_sampling_guide.pop(0)
-                    else:
-                        warmup_coefficients = 2. * (nrandom.rand((len(test_reaction_id_list))) - 0.5)
-                        for the_multiplier in [1, -1]:
-                            the_objective_dict[the_multiplier] = {}
-                            for the_reaction_index, the_reaction_id in enumerate(test_reaction_id_list):
-                                the_coefficient = the_multiplier * warmup_coefficients[the_reaction_index]
-                                if the_coefficient >= 0:
-                                    the_maximize_reaction_id = reaction_partner_dict[the_reaction_id]['maximize']
-                                    the_maximize_reaction_sense = reaction_partner_dict[the_reaction_id]['maximize_sense']
-                                    the_reaction = cobra_model.reactions.get_by_id(the_maximize_reaction_id)
-                                    if the_maximize_reaction_sense == 'maximize':
-                                        the_objective_dict[the_multiplier][the_reaction.id] = the_coefficient
-                                    if the_maximize_reaction_sense == 'minimize':
-                                        the_objective_dict[the_multiplier][the_reaction.id] = -1. * the_coefficient
-                                else:
-                                    the_minimize_reaction_id = reaction_partner_dict[the_reaction_id]['minimize']
-                                    the_minimize_reaction_sense = reaction_partner_dict[the_reaction_id]['minimize_sense']
-                                    the_reaction = cobra_model.reactions.get_by_id(the_minimize_reaction_id)
-                                    if the_minimize_reaction_sense == 'minimize':
-                                        the_objective_dict[the_multiplier][the_reaction.id] = the_coefficient
-                                    if the_minimize_reaction_sense == 'maximize':
-                                        the_objective_dict[the_multiplier][the_reaction.id] = -1. * the_coefficient
+            while not found_a_point_pair:
+                the_objective_dict = {}
+                for x in sampling_ids:
+                    cobra_model.reactions.get_by_id(x).objective_coefficient = 0
+                # We try to start with the best solution
+                # but will have to start from scratch if we violate it
+                # by altering the reverse reaction bounds.
+                if len(the_sampling_guide) > 0:
                     for the_multiplier in [1, -1]:
-                        first_try = True
-                        found_a_point = False
-                        the_solution = best_solution
+                        the_objective_dict[the_multiplier] = {}
+                        if the_multiplier == 1:
+                            the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0][0]
+                        else:
+                            the_sample_reaction_id_list, the_sample_reactions_coefficients = the_sampling_guide[0][1]
+                        for the_reaction_id in sampling_ids:
+                            if the_reaction_id in the_sample_reaction_id_list:
+                                the_index = the_sample_reaction_id_list.index(the_reaction_id)
+                                the_objective_dict[the_multiplier][the_reaction_id] = the_sample_reactions_coefficients[the_index]
+                            else:
+                                the_objective_dict[the_multiplier][the_reaction_id] = 0
+                    the_sampling_guide.pop(0)
+                else:
+                    warmup_coefficients = 2. * (nrandom.rand((len(test_reaction_id_list))) - 0.5)
+                    for the_multiplier in [1, -1]:
+                        the_objective_dict[the_multiplier] = {}
+                        for the_reaction_index, the_reaction_id in enumerate(test_reaction_id_list):
+                            the_coefficient = the_multiplier * warmup_coefficients[the_reaction_index]
+                            if the_coefficient >= 0:
+                                the_maximize_reaction_id = reaction_partner_dict[the_reaction_id]['maximize']
+                                the_maximize_reaction_sense = reaction_partner_dict[the_reaction_id]['maximize_sense']
+                                the_reaction = cobra_model.reactions.get_by_id(the_maximize_reaction_id)
+                                if the_maximize_reaction_sense == 'maximize':
+                                    the_objective_dict[the_multiplier][the_reaction.id] = the_coefficient
+                                if the_maximize_reaction_sense == 'minimize':
+                                    the_objective_dict[the_multiplier][the_reaction.id] = -1. * the_coefficient
+                            else:
+                                the_minimize_reaction_id = reaction_partner_dict[the_reaction_id]['minimize']
+                                the_minimize_reaction_sense = reaction_partner_dict[the_reaction_id]['minimize_sense']
+                                the_reaction = cobra_model.reactions.get_by_id(the_minimize_reaction_id)
+                                if the_minimize_reaction_sense == 'minimize':
+                                    the_objective_dict[the_multiplier][the_reaction.id] = the_coefficient
+                                if the_minimize_reaction_sense == 'maximize':
+                                    the_objective_dict[the_multiplier][the_reaction.id] = -1. * the_coefficient
+                for the_multiplier in [1, -1]:
+                    first_try = True
+                    found_a_point = False
+                    the_solution = best_solution
                         
-                        while not found_a_point:
-                            for x in sampling_ids:
-                                cobra_model.reactions.get_by_id(x).objective_coefficient = 0
-                            for x in the_objective_dict[the_multiplier].keys():
-                                cobra_model.reactions.get_by_id(x).objective_coefficient = the_objective_dict[the_multiplier][x]
+                    while not found_a_point:
+                        for x in sampling_ids:
+                            cobra_model.reactions.get_by_id(x).objective_coefficient = 0
+                        for x in the_objective_dict[the_multiplier].keys():
+                            cobra_model.reactions.get_by_id(x).objective_coefficient = the_objective_dict[the_multiplier][x]
 
-                            the_result = sampling_optimize(cobra_model,
-                                                       solver = solver,
-                                                       objective_sense = 'maximize',
-                                                       # Need to include new_objective
-                                                       # here to update the_problem
-                                                       # when hot-starting.
-                                                       new_objective = the_objective_dict[the_multiplier],
-                                                       the_problem = the_solution,
-                                                       tolerance_optimality = tolerance_optimality,
-                                                       tolerance_feasibility = tolerance_feasibility,
-                                                       tolerance_barrier = tolerance_barrier,
-                                                       tolerance_integer = tolerance_integer)
+                        the_result = sampling_optimize(cobra_model,
+                                           solver = solver,
+                                           objective_sense = 'maximize',
+                                           # Need to include new_objective
+                                           # here to update the_problem
+                                           # when hot-starting.
+                                           new_objective = the_objective_dict[the_multiplier],
+                                           the_problem = the_solution,
+                                           tolerance_optimality = tolerance_optimality,
+                                           tolerance_feasibility = tolerance_feasibility,
+                                           tolerance_barrier = tolerance_barrier,
+                                           tolerance_integer = tolerance_integer)
 
-                            if type(cobra_model.solution.f) != types.NoneType:
-                                if cobra_model.solution.status in optimal_solution_strings:
-                                    found_a_point = True
-                                    warmup_point_pair = concatenate((warmup_point_pair, zeros((len(sampling_ids),1))), axis=1)
-                                    for storage_index, the_current_reaction_id in enumerate(sampling_ids):
-                                         warmup_point_pair[storage_index, -1] = cobra_model.solution.x_dict[the_current_reaction_id]
+                        if type(cobra_model.solution.f) != types.NoneType:
+                            if cobra_model.solution.status in optimal_solution_strings:
+                                found_a_point = True
+                                warmup_point_pair = concatenate((warmup_point_pair, zeros((len(sampling_ids),1))), axis=1)
+                                for storage_index, the_current_reaction_id in enumerate(sampling_ids):
+                                     warmup_point_pair[storage_index, -1] = cobra_model.solution.x_dict[the_current_reaction_id]
 
-                            if (type(cobra_model.solution.f) == types.NoneType):
-                                # Reset the best_solution for future tries
-                                for the_objective_reaction in sampling_ids:
-                                    cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = 0
-                                    if the_reaction_id in nonzero_objective_dict.keys():
-                                        cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = nonzero_objective_dict[the_objective_reaction]
-                                best_solution = sampling_optimize(cobra_model,
+                        if (type(cobra_model.solution.f) == types.NoneType):
+                            # Reset the best_solution for future tries
+                            for the_objective_reaction in sampling_ids:
+                                cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = 0
+                                if the_reaction_id in nonzero_objective_dict.keys():
+                                    cobra_model.reactions.get_by_id(the_objective_reaction).objective_coefficient = nonzero_objective_dict[the_objective_reaction]
+                            best_solution = sampling_optimize(cobra_model,
                                                               solver = solver,
                                                               the_problem = None,
                                                               new_objective = nonzero_objective_dict,
                                                               tolerance_optimality = tolerance_optimality,
                                                               tolerance_feasibility = tolerance_feasibility,
                                                               tolerance_barrier = tolerance_barrier,
-                                    tolerance_integer = tolerance_integer)
-                                for the_reaction_id in sampling_ids:
-                                    the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
-                                    the_reaction.objective_coefficient = 0
-                                for x in the_objective_dict[the_multiplier].keys():
-                                    cobra_model.reactions.get_by_id(x).objective_coefficient = the_objective_dict[the_multiplier][x]
+                                tolerance_integer = tolerance_integer)
+                            for the_reaction_id in sampling_ids:
+                                the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
+                                the_reaction.objective_coefficient = 0
+                            for x in the_objective_dict[the_multiplier].keys():
+                                cobra_model.reactions.get_by_id(x).objective_coefficient = the_objective_dict[the_multiplier][x]
 
-                            if (not found_a_point) & (first_try == True):
-                                # Try this one more time but force solving from scratch
-                                the_solution = None
-                                first_try = False
-                            elif (not found_a_point) & (first_try == False):
-                                # Give up and move on
-                                found_a_point = True
+                        if (not found_a_point) & (first_try == True):
+                            # Try this one more time but force solving from scratch
+                            the_solution = None
+                            first_try = False
+                        elif (not found_a_point) & (first_try == False):
+                            # Give up and move on
+                            found_a_point = True
 
-                            if found_a_point & (the_multiplier == -1):
-                                found_a_point_pair = True
+                        if found_a_point & (the_multiplier == -1):
+                            found_a_point_pair = True
 
-                if warmup_point_pair.shape[1] == 2:
-                    warmup_points = concatenate((warmup_points, warmup_point_pair), axis=1)
-                    sampling_object.warmup_points = warmup_points
-                    n_rows, n_warmup_pts_found = warmup_points.shape
+            if warmup_point_pair.shape[1] == 2:
+                warmup_points = concatenate((warmup_points, warmup_point_pair), axis=1)
+                sampling_object.warmup_points = warmup_points
+                n_rows, n_warmup_pts_found = warmup_points.shape
 
-                # Move onto the next
+            # Move onto the next
 
-                if verbose:
-                    pass_s = time() - start_time
-                    if n_warmup_pts_found > 0:
-                        remaining_s = (pass_s  / n_warmup_pts_found) * (n_points - n_warmup_pts_found)
-                    else:
-                        remaining_s = (pass_s * n_points) 
-                    remaining_h = floor((remaining_s)/3600)
-                    remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
-                    print("Found "+ str(n_warmup_pts_found) + " of " + str(n_points) + " warmup points.  El: %0.0f s.  R: %0.0f hr %0.0f min." % (pass_s, remaining_h, remaining_m))                  
-
-
-            irreversible_reaction_ids = []
-            irreversible_reaction_indices = []
-            irreversible_reaction_ub = []
-            irreversible_reaction_lb = []
-            tms_reaction_ids = []
-            tms_reaction_indices = []
-            tms_reaction_ub = []
-            tms_reaction_lb = []
-            reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
-            
-            penalty_reaction_id = 'penalty'
-            for index, x in enumerate(sampling_ids):
-                if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
-                    irreversible_reaction_ids.append(x)
-                    irreversible_reaction_indices.append(index)
-                    irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-                elif not x.startswith("IRRMILP_"):
-                    tms_reaction_ids.append(x)
-                    tms_reaction_indices.append(index)
-                    tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
-                    tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
-            reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, warmup_points)
-            reversible_reaction_warmup_points_center = reversible_reaction_warmup_points.mean(1).reshape(len(reversible_reaction_ids),1)
-            reversible_reaction_warmup_points = 0.33 * reversible_reaction_warmup_points + 0.67 * reversible_reaction_warmup_points_center * ones((1, n_points))
-            convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
-            calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
-
-            forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
-            for index, the_reaction_id in enumerate(irreversible_reaction_ids):
-                if not the_reaction_id.endswith('_reverse'):
-                    forward_reaction_flag[index] = 1
-
-            warmup_points = zeros((len(sampling_ids), 0))
-
-            for the_point_index in range(0, n_points):
-                cur_rev_point = reversible_reaction_warmup_points[:, the_point_index]
-                rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
-                cur_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
-                cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
-                array_to_add_warmup_points = zeros((len(sampling_ids),1))
-                # Do it this way to set indicator rxns to nans since we aren't checking them
-                for the_index, the_id in enumerate(sampling_ids):
-                    the_value_sampled_points = NAN
-                    the_value_initial_points = NAN
-                    if the_id in irreversible_reaction_ids:
-                        the_source_index = irreversible_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_irrev_point[the_source_index]
-                    elif the_id in tms_reaction_ids:
-                        the_source_index = tms_reaction_ids.index(the_id)
-                        the_value_warmup_points = cur_tms_point[the_source_index]
-                array_to_add_warmup_points[the_index,0] = the_value_warmup_points
-                warmup_points = concatenate((warmup_points, array_to_add_warmup_points), axis=1)
+            if verbose:
+                pass_s = time() - start_time
+                if n_warmup_pts_found > 0:
+                    remaining_s = (pass_s  / n_warmup_pts_found) * (n_points - n_warmup_pts_found)
+                else:
+                    remaining_s = (pass_s * n_points) 
+                remaining_h = floor((remaining_s)/3600)
+                remaining_m = floor(((remaining_s)/3600 - remaining_h) * 60)
+                print("Found "+ str(n_warmup_pts_found) + " of " + str(n_points) + " warmup points.  El: %0.0f s.  R: %0.0f hr %0.0f min." % (pass_s, remaining_h, remaining_m))                  
 
 
+        irreversible_reaction_ids = []
+        irreversible_reaction_indices = []
+        irreversible_reaction_ub = []
+        irreversible_reaction_lb = []
+        tms_reaction_ids = []
+        tms_reaction_indices = []
+        tms_reaction_ub = []
+        tms_reaction_lb = []
+        reaction_partner_dict = get_rev_optimization_partner_dict(cobra_model)
 
-        return warmup_points
+        penalty_reaction_id = 'penalty'
+        for index, x in enumerate(sampling_ids):
+            if ((not x.startswith("IRRMILP_")) & (not x.startswith("TMS_")) & (not x == penalty_reaction_id)):
+                irreversible_reaction_ids.append(x)
+                irreversible_reaction_indices.append(index)
+                irreversible_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+                irreversible_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+            elif not x.startswith("IRRMILP_"):
+                tms_reaction_ids.append(x)
+                tms_reaction_indices.append(index)
+                tms_reaction_ub.append(cobra_model.reactions.get_by_id(x).upper_bound)
+                tms_reaction_lb.append(cobra_model.reactions.get_by_id(x).lower_bound)
+        reversible_reaction_warmup_points, ub_rev, lb_rev, reversible_reaction_ids = convert_points_to_reversible(reaction_partner_dict, irreversible_reaction_ids, irreversible_reaction_ub, irreversible_reaction_lb, warmup_points)
+        reversible_reaction_warmup_points_center = reversible_reaction_warmup_points.mean(1).reshape(len(reversible_reaction_ids),1)
+        reversible_reaction_warmup_points = 0.33 * reversible_reaction_warmup_points + 0.67 * reversible_reaction_warmup_points_center * ones((1, n_points))
+        convert_rev_to_irrev_array = create_rev_to_irrev_conversion_array(irreversible_reaction_ids, reversible_reaction_ids, reaction_partner_dict)
+        calc_tms_from_irrev_array = create_tms_from_irrev_conversion_array(tms_reaction_ids, irreversible_reaction_ids, cobra_model)
+
+        forward_reaction_flag = zeros((len(irreversible_reaction_ids)))
+        for index, the_reaction_id in enumerate(irreversible_reaction_ids):
+            if not the_reaction_id.endswith('_reverse'):
+                forward_reaction_flag[index] = 1
+
+        warmup_points = zeros((len(sampling_ids), 0))
+
+        for the_point_index in range(0, n_points):
+            cur_rev_point = reversible_reaction_warmup_points[:, the_point_index]
+            rev_to_irrev = dot(convert_rev_to_irrev_array, cur_rev_point)
+            cur_irrev_point = (((rev_to_irrev * forward_reaction_flag) > 0) * rev_to_irrev) - (((rev_to_irrev * (1 - forward_reaction_flag)) < 0) * rev_to_irrev)
+            cur_tms_point = dot(calc_tms_from_irrev_array, cur_irrev_point)
+            array_to_add_warmup_points = zeros((len(sampling_ids),1))
+            # Do it this way to set indicator rxns to nans since we aren't checking them
+            for the_index, the_id in enumerate(sampling_ids):
+                the_value_sampled_points = NAN
+                the_value_initial_points = NAN
+                if the_id in irreversible_reaction_ids:
+                    the_source_index = irreversible_reaction_ids.index(the_id)
+                    the_value_warmup_points = cur_irrev_point[the_source_index]
+                elif the_id in tms_reaction_ids:
+                    the_source_index = tms_reaction_ids.index(the_id)
+                    the_value_warmup_points = cur_tms_point[the_source_index]
+            array_to_add_warmup_points[the_index,0] = the_value_warmup_points
+            warmup_points = concatenate((warmup_points, array_to_add_warmup_points), axis=1)
+
+    return warmup_points
 
 
 
@@ -2071,9 +1937,9 @@ def calculate_const_ind_reversible(sampling_object):
 
     """
     the_reversible_points, the_reversible_list = convert_sampling_results_to_reversible(sampling_object, type = "warmup")
-    reaction_partner_dict = get_rev_optimization_partner_dict(sampling_object.cobra_model_full)
+    reaction_partner_dict = get_rev_optimization_partner_dict(sampling_object.cobra_model)
     const_ind_reversible = sampling_object.const_ind
-    the_irreversible_list = sampling_object.the_reaction_ids_full
+    the_irreversible_list = sampling_object.the_reaction_ids
     const_ind_reversible = []
     
     for the_reversible_index, the_reversible_id in enumerate(the_reversible_list):
