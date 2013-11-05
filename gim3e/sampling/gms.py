@@ -1174,18 +1174,20 @@ def load_sampling_object(filename, path = ""):
     # changes made to the object
 
     if 'const_ind' in dir(the_sampling_dict):
-        the_sampling_object.const_ind = sampling_dict['const_ind']
+        the_sampling_object.const_ind = the_sampling_dict['const_ind']
     if 'const_values' in dir(the_sampling_dict):
-        the_sampling_object.const_values = sampling_dict['const_values']
+        the_sampling_object.const_values = the_sampling_dict['const_values']
     if 'lb' in dir(the_sampling_dict):
-        the_sampling_object.lb = sampling_dict['lb']
+        the_sampling_object.lb = the_sampling_dict['lb']
     if 'the_reaction_ids' in dir(the_sampling_dict):
-        the_sampling_object.the_reaction_ids = sampling_dict['the_reaction_ids']
+        the_sampling_object.the_reaction_ids = the_sampling_dict['the_reaction_ids']
     if 'ub' in dir(the_sampling_dict):
-        the_sampling_object.ub = sampling_dict['ub']
+        the_sampling_object.ub = the_sampling_dict['ub']
     
     if len(path) == 0:
         new_path = "."
+    else:
+        new_path = path
     files = [f for f in os.listdir(new_path) if os.path.isfile(f)]
     if (filename + "_warmup_point_matrix.npy") in files:
         the_sampling_object.warmup_points = load(path + filename + "_warmup_point_matrix.npy")
