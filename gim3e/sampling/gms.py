@@ -138,6 +138,8 @@ def achr_sampler(sampling_object, **kwargs):
     else:
         n_points = round(len(reaction_partner_dict.keys()) * 2)
 
+    # Can specify to stop either on number of steps or
+    # if the new point keeps the distribution well mixed
     if 'point_stopping_condition' in kwargs:
         point_stopping_condition = kwargs['point_stopping_condition']
         if point_stopping_condition >= 1:
@@ -148,15 +150,18 @@ def achr_sampler(sampling_object, **kwargs):
             point_stopping_type = 'mix_frac'
             check_steps = round(len(reaction_partner_dict.keys()) * 0.5)
             stop_steps = 100 * check_steps
+            # If the point doesn't meet mixing criteria in 
+            # max_trials_per_start, pick a new starting point
+            max_trials_per_start = 10
     else:
-        point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
-        point_stopping_type = 'n_steps'
         # Otherwise, we could give each warmup point a shot.
         # Can in theory pare this down to ~200 as in previous ACHR
         # By default I tie this to the number of reactions.
         # In preliminary testing I had OK results with 50% of 
         # the # of warmup points.  1.5x is even safer.
         # May want to increase if mix_frac still looks bad
+        point_stopping_condition = round(len(reaction_partner_dict.keys()) * 2)
+        point_stopping_type = 'n_steps' 
 
     print("Initializing matrices for sampling... ")        
     # Extract the reaction data from the warmup points
@@ -246,7 +251,8 @@ def achr_sampler(sampling_object, **kwargs):
 
             initial_rev_point = previous_rev_point + 0
             successful_steps_for_current_point = 0
-                
+
+            cur_trial_for_start = 1
 
             # attempted_steps_for_current_point < n_steps_per_point:
             while continue_moving_current_point == True: 
@@ -355,9 +361,20 @@ def achr_sampler(sampling_object, **kwargs):
                     elif successful_steps_for_current_point > stop_steps:
                         successful_steps_for_current_point = 0
                         attempted_steps_for_current_point = 0
-                        cur_rev_point = initial_rev_point
-                        print("Over step limit, reset.")
-                                
+                        if (cur_trial_for_start < max_trials_per_start) | (n_valid_points < 2):
+                            print("Over step limit, reset.")
+                            cur_trial_for_start += 1
+                            cur_rev_point = initial_rev_point
+                        else:
+                            print("Over maximum trials for the current starting point, trying a new one.")
+                            cur_trial_for_start = 1
+                            # Warmup points are probably too close to the edges,
+                            # Try grabbing a previous point to start from
+                            # May want to adjust point selection in the future
+                            random_point_id = random.sample([x for x in range(0, n_valid_points - 1)], 1)[0]
+                            initial_rev_point = the_reversible_initial[:, random_point_id]
+                            cur_rev_point = initial_rev_point
+            
             # Test the last successful point found during the steps, validated prev_rev_point as 
             # acceptable by both TMS and either mix_frac or n_steps
             cur_rev_point = previous_rev_point 
