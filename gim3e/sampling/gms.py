@@ -1190,15 +1190,15 @@ def load_sampling_object(filename, path = ""):
     # Update in case there were 
     # changes made to the object
 
-    if 'const_ind' in dir(the_sampling_dict):
+    if 'const_ind' in the_sampling_dict.keys():
         the_sampling_object.const_ind = the_sampling_dict['const_ind']
-    if 'const_values' in dir(the_sampling_dict):
+    if 'const_values' in the_sampling_dict.keys():
         the_sampling_object.const_values = the_sampling_dict['const_values']
-    if 'lb' in dir(the_sampling_dict):
+    if 'lb' in the_sampling_dict.keys():
         the_sampling_object.lb = the_sampling_dict['lb']
-    if 'the_reaction_ids' in dir(the_sampling_dict):
+    if 'the_reaction_ids' in the_sampling_dict.keys():
         the_sampling_object.the_reaction_ids = the_sampling_dict['the_reaction_ids']
-    if 'ub' in dir(the_sampling_dict):
+    if 'ub' in the_sampling_dict.keys():
         the_sampling_object.ub = the_sampling_dict['ub']
     
     if len(path) == 0:
