@@ -17,6 +17,8 @@ expression data.  Bioinformatics.
 Release history
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Release       Date          Notes
+1.0.3         11.12.2013    -Substantial GMS improvements, additional
+                             updates are anticipated.
 1.0.2         08.20.2013    -Change module structure to prepare for release.
                             -Note GMS is still a "development version" sampler
                              but runs stably and has been tested for E. coli core

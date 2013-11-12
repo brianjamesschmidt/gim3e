@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 setup(
     name = "gim3e",
-    version = "1.0.2",
+    version = "1.0.3",
     packages = find_packages(),
 )
 
@@ -9,7 +9,7 @@ import ez_setup
 ez_setup.use_setuptools()
 from setuptools import setup, find_packages
 from pdb import set_trace
-__version = '1.0.2'
+__version = '1.0.3'
 setup(
     name = "gim3e",
     version = __version,
