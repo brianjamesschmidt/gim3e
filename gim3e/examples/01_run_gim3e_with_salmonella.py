@@ -24,10 +24,8 @@ from types import *
 from  cobra import __version__ as cobra_version
 
 
-gim3e_dir = gim3e.__file__
-n_remove_chars = len('/core/gim3e.py')
-gim3e_dir = gim3e_dir[:(-1 * (n_remove_chars))]
-data_dir = gim3e_dir + "/data/"
+gim3e_dir = gim3e.__path__[0]
+data_dir = gim3e_dir + '/data/'
 
 # read in the pre-processed omics data
 fp = open(data_dir + "transcriptomics_dict.pickle", "rb")

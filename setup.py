@@ -1,10 +1,3 @@
-from setuptools import setup, find_packages
-setup(
-    name = "gim3e",
-    version = "1.0.3",
-    packages = find_packages(),
-)
-
 import ez_setup
 ez_setup.use_setuptools()
 from setuptools import setup, find_packages
@@ -15,6 +8,7 @@ setup(
     version = __version,
     packages = find_packages(),
     #scripts = [''],
+    zip_safe = False
     setup_requires = [],
     install_requires = ['cobra>=0.2.0'],
     #install_requires = [],
