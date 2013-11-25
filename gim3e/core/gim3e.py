@@ -862,6 +862,8 @@ def irreversible_flux_variability_analysis(cobra_model, **kwargs):
             # set to get a hot-start
             # solution for FVA runs           
             candidates = cobra_model.reactions.query("biomass")
+            candidates += cobra_model.reactions.query("penalty")
+            candidates += cobra_model.reactions.query("objective")
             objective_reaction = None
             for test_reaction in candidates:
                 if ((test_reaction.upper_bound != 0) | (test_reaction.lower_bound != 0)):
@@ -2140,17 +2142,12 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
         the_methods = [1, 2, 3, 4, 5, 6]
         parameter_defaults.update({'lp_method': 1,
                     'tolerance_markowitz': 0.9})
-                    # It can be detrimental to set the gap too small
-                    # 'MIP_gap_abs': 0,
-                    # 'MIP_gap': 0})
         configuration_parameters = deepcopy(parameter_defaults)
         configuration_parameters.update(kwargs)
         # Allow a little bit of slack in the integer solution
         # based on the selected tolerance
         # As a rule of thumb, sall absolute gaps are pretty hard for the solver
-        # But seem to be able to find good solutions with 1E-6.
-        #configuration_parameters['MIP_gap_abs'] = max(1E-6, configuration_parameters['tolerance_feasibility'])
-        #configuration_parameters['MIP_gap'] = 0        
+        # But seem to be able to find good solutions with 1E-6. 
         if configuration_parameters['the_problem'] == None:
             the_problem = the_solver.create_problem(cobra_model, **configuration_parameters)
             the_problem.parameters.read.scale.set(-1)
@@ -2182,8 +2179,6 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
         the_methods = [0, 2, 1]
         parameter_defaults.update({'lp_method': 1,
                     'tolerance_markowitz': 1E-4})
-                    # 'MIP_gap_abs': 0,
-                    # 'MIP_gap': 0})
         configuration_parameters = deepcopy(parameter_defaults)
         configuration_parameters.update(kwargs)
         # Allow a little bit of slack in the integer solution
@@ -2194,7 +2189,6 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
             the_problem = the_solver.create_problem(cobra_model, **configuration_parameters)
             the_problem.setParam('presolve', 0)
             the_problem.setParam('scaleflag', 0)
-            # the_problem.setParam('mipgapabs', 0)
             alt_gurobi_flag = True            
             # Additional arguments here if needed
         else:
@@ -2272,10 +2266,12 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
         # it is deemed not worthy, maybe due to quality issues
         # To be safe declare all these as infeasible
         # to force a new solution attempt
-        the_solution = None
+        the_solution = the_solver.format_solution(lp, cobra_model)
+        the_solution.id = None
+        the_solution.f = None
         the_solution.status = 'infeasible'
         if error_reporting:
-            print '%s failed: infeasible'%(solver)          
+            print '%s solution is infeasible'%(solver)      
 
     cobra_model.solution = the_solution
     return lp
