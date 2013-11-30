@@ -8,7 +8,7 @@ setup(
     version = __version,
     packages = find_packages(),
     #scripts = [''],
-    zip_safe = False
+    zip_safe = False,
     setup_requires = [],
     install_requires = ['cobra>=0.2.0'],
     #install_requires = [],
