@@ -23,8 +23,8 @@ from copy import deepcopy
 from types import *
 from  cobra import __version__ as cobra_version
 
-
-gim3e_dir = gim3e.__path__[0]
+gim3e_dir = gim3e.__file__[:-15]
+# remove '/core/gim3e.pyc'
 data_dir = gim3e_dir + '/data/'
 
 # read in the pre-processed omics data

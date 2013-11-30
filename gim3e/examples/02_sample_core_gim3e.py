@@ -18,7 +18,8 @@ selected_tolerance = 1E-8
 selected_growth = 0
 selected_penalty = 0
 
-gim3e_dir = gim3e.__path__[0]
+gim3e_dir = gim3e.__file__[:-15]
+# remove '/core/gim3e.pyc'
 data_dir = gim3e_dir + '/data/'
 
 # develop the sampling algorithm with E coli core as a first approach
