@@ -1056,7 +1056,7 @@ def irreversible_flux_variability_analysis(cobra_model, **kwargs):
                             
                 if verbose:
                     next_reaction_id = "...none.  All done"
-                    the_index = the_reactions.index(the_reaction.id)
+                    the_index = the_reactions.index(the_reaction)
                     pass_s = time() - start_time
                     remaining_s = pass_s * (len(the_reactions) - (the_index + 1)) / (the_index + 1)
                     remaining_h = floor((remaining_s)/3600)
@@ -2058,15 +2058,11 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
     # For transparency, declare parameter defaults locally
     # These are overwitten by any kwargs as configuration_parameters
     parameter_defaults = deepcopy(parameter_defaults[solver])
-    parameter_defaults = {'new_objective': None,
+    parameter_defaults = {
                           'objective_sense': 'maximize',
-                          'min_norm': 0,
-                          'the_problem': None, 
                           'tolerance_optimality': 1e-7,
                           'tolerance_feasibility': 1e-7,
                           'tolerance_integer': 1e-9, 
-                          'error_reporting': None,
-                          'print_solver_time': False,
                           'quadratic_component': None}
     
     # Also, pop integer gap defaults if any

@@ -23,9 +23,10 @@ from copy import deepcopy
 from types import *
 from  cobra import __version__ as cobra_version
 
-gim3e_dir = gim3e.__file__[:-15]
-# remove '/core/gim3e.pyc'
-data_dir = gim3e_dir + '/data/'
+from os.path import dirname, join, abspath
+
+gim3e_dir = abspath(join(dirname(gim3e.__file__), ".."))
+data_dir = join(gim3e_dir, 'data', '')
 
 # read in the pre-processed omics data
 fp = open(data_dir + "transcriptomics_dict.pickle", "rb")
