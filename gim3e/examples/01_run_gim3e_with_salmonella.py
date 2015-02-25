@@ -122,8 +122,13 @@ for the_key in shared_keys:
 print(len(unsolved_max_one.keys()))
 print(len(unsolved_min_one.keys()))
 
-hist(delta_dict_max.values())
-hist(delta_dict_min.values())
+try:
+    from matplotlib.pyplot import hist
+except ImportError:
+    print("matplotlib not found - won't plot")
+else:
+    hist(delta_dict_max.values())
+    hist(delta_dict_min.values())
 
 # We can also test for required metabolites
 test_metabolites = {x.id: [x] for x in gim3e_model.reactions if x.id.startswith("TMS_")}
