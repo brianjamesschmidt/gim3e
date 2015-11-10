@@ -2123,7 +2123,11 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
                 else:
                     new_objectives[the_objective] = 1.
             kwargs['new_objective'] = new_objectives     
-        update_objective(cobra_model, kwargs.pop('new_objective'))
+        # update objective
+        for reaction in cobra_model.reactions:
+            reaction.objective_coefficient = 0
+        for reaction, value in kwargs.pop('new_objective').items():
+            reaction.objective_coefficient = value
 
     alt_cplex_flag = False
     alt_gurobi_flag = False    
