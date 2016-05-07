@@ -1,5 +1,9 @@
+from cobra import __version__ as cobra_version
+from cobra.core.Reaction import Reaction
+
 # Load these to help determine which solver solutions are OK
-acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance', 'x_bound_infeasible']
+acceptable_solution_strings = ['optimal', 'MIP_optimal', 'optimal_tolerance',
+                               'x_bound_infeasible']
 # May want to include this as acceptable when running cplex
 # if a small violation of the boundaries is OK: 'x_bound_infeasible'
 optimal_solution_strings = ['optimal']
@@ -7,20 +11,20 @@ optimal_solution_strings = ['optimal']
 # This might lead to some differences in convergence from gurobi, 
 # which is limited to 1e-9.
 integer_tolerances = {'cplex': 0, 'gurobi': 1e-9, 'glpk': 1e-9}
-from  cobra import __version__ as cobra_version
 
-def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
-           metabolite_list = [],
-           fraction_growth = 0.9,
-           relative_penalty_bound = 1.,
-           solver_tolerance = 1E-7,
-           metabolite_flux_requirement = True,
-           monitor_all_cellular_metabolites = False,
-           MILP_formulation = False,
-           run_FVA = True,
-           reduce_model = False,
-           trim_model = False,
-           solver = 'cplex'):
+
+def gim3e(cobra_model, expression_dict={}, expression_threshold=0.,
+          metabolite_list=[],
+          fraction_growth=0.9,
+          relative_penalty_bound=1.,
+          solver_tolerance = 1E-7,
+          metabolite_flux_requirement = True,
+          monitor_all_cellular_metabolites = False,
+          MILP_formulation = False,
+          run_FVA = True,
+          reduce_model = False,
+          trim_model = False,
+          solver = 'cplex'):
     """ Gene Inactivity Moderated by Metabolism, Metabolomics, and Expression (GIM^3E)
     Create model from mRNA expression data (and/or potentially high coverage proteomics)
     while requiring the utilization of specific network metabolites
@@ -106,7 +110,6 @@ def gim3e(cobra_model, expression_dict = {}, expression_threshold = 0.,
     """
 
     from copy import deepcopy
-    from cobra.core.Reaction import Reaction
     from cobra import solvers
     import types
     continue_flag = True
@@ -474,7 +477,7 @@ def add_turnover_metabolites(cobra_model, metabolite_id_list, epsilon):
         r_metabolite = cobra_model.metabolites.get_by_id(metabolite_id)
         sum_abs_source_reaction_bounds = 0
 
-        the_reaction_id_list = [x.id for x in r_metabolite.get_reaction()]
+        the_reaction_id_list = [x.id for x in r_metabolite.reactions]
         for the_reaction_id in the_reaction_id_list:
             the_reaction = cobra_model.reactions.get_by_id(the_reaction_id)
             coefficient = abs(the_reaction.get_coefficient(r_metabolite))
@@ -547,7 +550,7 @@ def convert_to_irreversible_with_indicators(cobra_model, mutually_exclusive_dire
             reaction.reversibility = 0
             reverse_reaction.reversibility = 0
             reaction_dict = {}
-            current_metabolites = [x for x in (reaction.get_products() + reaction.get_reactants())]
+            current_metabolites = list(reaction.metabolites)
             for the_metabolite in current_metabolites:
                 reaction_dict[the_metabolite] = -2 * reaction.get_coefficient(the_metabolite.id)
             reverse_reaction.add_metabolites(reaction_dict)
@@ -673,11 +676,11 @@ def remove_model_reactions(cobra_model, the_reactions_to_remove = [], FVA_result
       
     # Remove orphaned metabolites
     for metabolite in cobra_model.metabolites:
-        if len(metabolite.get_reaction()) == 0:
+        if len(metabolite.reactions) == 0:
             metabolite.remove_from_model(cobra_model)
     # Remove orphan genes
     for gene in cobra_model.genes:
-        if len(gene.get_reaction()) == 0:
+        if len(gene.reactions) == 0:
             gene.remove_from_model(cobra_model)
 
     return (cobra_model, FVA_result_dict)
@@ -2044,7 +2047,6 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
       for all solvers is performed
 
     """
-    from cobra.flux_analysis.objective import update_objective
     from cobra import solvers
     from copy import deepcopy
     import types
@@ -2094,6 +2096,8 @@ def gim3e_optimize(cobra_model, solver='cplex', error_reporting=True, **kwargs):
     reaction_id_list = []
     if 'new_objective' in kwargs and \
            kwargs['new_objective'] not in ['update problem', None]:
+        if isinstance(kwargs['new_objective'], Reaction):
+            kwargs['new_objective'] = [kwargs['new_objective']]
         new_objectives = {}
         if isinstance(kwargs['new_objective'], str):
             reaction_id_list = [x.id for x in cobra_model.reactions]
